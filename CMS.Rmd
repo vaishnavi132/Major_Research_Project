@@ -1,0 +1,191 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+PACKAGES INSTALLATION 
+
+```{r}
+library(readxl)
+library(dplyr)
+library(org.Hs.eg.db)
+library(openxlsx)
+
+#installing all the packages 
+new_lib_path <- "C:/Users/Vaishnavi Raikar/Documents/R/win-library/4.3-project"
+dir.create(new_lib_path, showWarnings = FALSE, recursive = TRUE)
+
+#setting the custom library path
+.libPaths(new_lib_path)
+
+install.packages("BiocManager", lib = new_lib_path)
+install.packages("remotes", lib = new_lib_path)
+
+#installing the CMSclassifier from GITHUB 
+remotes::install_github("Sage-Bionetworks/CMSclassifier", lib = new_lib_path)
+
+library(BiocManager, lib.loc = new_lib_path)
+library(CMSclassifier, lib.loc = new_lib_path)
+
+# Install devtools package if not already installed
+if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools")
+}
+
+# Install CMScaller package from GitHub
+devtools::install_github("Lothelab/CMScaller")
+
+# Load necessary libraries
+library(CMScaller)
+
+
+```
+
+
+```{r}
+
+# Install Bioconductor package manager if not already installed
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+
+# Install biomaRt package
+BiocManager::install("biomaRt")
+
+# Load the biomaRt package
+library(biomaRt)
+
+if (!requireNamespace("writexl", quietly = TRUE)) install.packages("writexl")
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+if (!requireNamespace("tidyr", quietly = TRUE)) install.packages("tidyr")
+
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+
+```
+
+
+```{r}
+file_path <- "C:/Users/Vaishnavi Raikar/Downloads/In house dataset.xlsx"
+
+# Read the data from the Excel file
+data <- read_excel(file_path)
+
+# Assuming the gene symbols are in a column named "Gene"
+gene_symbols <- unique(data$Gene)
+
+# Map gene symbols to Entrez IDs using org.Hs.eg.db
+mapped_ids <- AnnotationDbi::select(org.Hs.eg.db,
+                                    keys = gene_symbols,
+                                    columns = c("SYMBOL", "ENTREZID"),
+                                    keytype = "SYMBOL")
+
+# Handle multiple mappings by keeping the first occurrence for each SYMBOL
+mapped_ids_unique <- mapped_ids %>%
+  distinct(SYMBOL, .keep_all = TRUE)
+
+# Remove rows with NA Entrez IDs
+mapped_ids_clean <- mapped_ids_unique %>%
+  filter(!is.na(ENTREZID))
+
+# Merge the Entrez IDs back with the original data
+merged_data <- left_join(data, mapped_ids_clean, by = c("Gene" = "SYMBOL"))
+
+# Remove rows with NA Entrez IDs from the merged data
+final_data <- merged_data %>%
+  filter(!is.na(ENTREZID))
+
+# Save the result to a new Excel file
+output_path <- "C:/Users/Vaishnavi Raikar/Downloads/In house dataset_entrez.xlsx"
+write.xlsx(final_data, output_path)
+
+```
+SETTING THE ENTREZ ID COLUMN AS ROW NAMES 
+
+```{r}
+
+# Convert the data to a tibble if it's not already
+final_data_1 <- as_tibble(final_data)
+
+# Move Entrez ID column to be the first column and remove the original Gene column
+final_data_1 <- final_data_1 %>%
+  dplyr::select(ENTREZID, everything(), -Gene)
+
+# Convert tibble to data frame to set row names
+final_data_1 <- as.data.frame(final_data_1)
+
+# Set the Entrez ID as row names
+rownames(final_data_1) <- final_data$ENTREZID
+final_data_1 <- final_data_1 %>% dplyr::select(-ENTREZID)
+
+
+```
+
+
+```{r}
+
+# Define the path to the adjusted Excel file
+file_path <- "C:/Users/Vaishnavi Raikar/Downloads/In house dataset_entrez.xlsx"
+
+# Read the adjusted Excel file
+final_data_1 <- read_xlsx(file_path)
+
+# Convert to data frame
+final_data_1 <- as.data.frame(final_data_1)
+
+# Remove the first column (gene column)
+final_data_1 <- final_data_1[, -1]
+
+# Set the Entrez ID as row names and remove the Entrez ID column from the data
+rownames(final_data_1) <- final_data_1$ENTREZID
+final_data_1 <- final_data_1[, !(names(final_data_1) %in% "ENTREZID")]
+
+# Convert to matrix
+expression_matrix <- as.matrix(final_data_1)
+
+
+# Perform CMS classification using CMScaller
+cms_results <- CMScaller(expression_matrix, RNAseq = TRUE, doPlot = TRUE)
+
+# Extract CMS results
+cms_predictions <- cms_results$prediction
+
+
+```
+
+```{r}
+
+# Define the path to the uploaded file
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/bar_plot.xlsx"
+
+# Read the data from the Excel file
+cms_results <- read_xlsx(file_path)
+
+# Reshape the data for plotting
+cms_long <- cms_results %>%
+  pivot_longer(cols = c(starts_with("CMS"), "NA"), names_to = "CMS", values_to = "Count")
+
+# Define colors for each CMS group
+cms_colors <- c("CMS1" = "#1f77b4", "CMS2" = "#ff7f0e", "CMS3" = "#2ca02c", "CMS4" = "#d62728", "NA" = "#808080")
+
+# Create the bar plot
+ggplot(cms_long, aes(x = Sample_Names, y = Count, fill = CMS)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cms_colors) +
+  labs(title = "CMS Counts per Patient Group",
+       x = "Patient Group",
+       y = "Count",
+       fill = "CMS") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
