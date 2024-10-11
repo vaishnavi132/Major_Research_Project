@@ -1,0 +1,291 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+MEAN EXPRESSION ANALYSIS 
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+# Function to calculate CV for a given patient group
+calculate_cv_for_patient <- function(patient_data) {
+  # Removing the genes with 0 counts in all patient samples
+  filtered_data <- patient_data %>%
+    filter(rowSums(select(., -Gene) != 0) > 0)
+  
+  # Removing the genes with less than 10 counts in all the samples
+  filtered_data <- filtered_data %>%
+    filter(rowSums(select(., -Gene) >= 20) > 0)
+  
+  # Calculation of mean, variance, and CV
+  pat_stats <- filtered_data %>%
+    rowwise() %>%
+    mutate(Mean = mean(c_across(-Gene), na.rm = TRUE),
+           Variance = var(c_across(-Gene), na.rm = TRUE),
+           CV = sqrt(Variance) / Mean) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+# Load the data for all patients
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+all_data <- read_xlsx(file_path)
+
+# Remove ENTREZID from the column names
+col_names <- colnames(all_data)
+col_names <- col_names[!grepl("ENTREZID", col_names)]  # Exclude ENTREZID
+
+# Create empty lists to store the average CV and Mean for each patient
+average_cv_list <- list()
+average_mean_list <- list()
+
+# Loop through each unique patient identifier
+for (pat in unique(gsub("_Sam.*", "", col_names[-1]))) {
+  # Select the columns related to the patient data
+  pat_cols <- col_names[grep(paste0("^", pat, "_"), col_names)]
+  
+  # Create a subset of the data for the specific patient
+  pat_data <- all_data %>%
+    select(Gene, all_of(pat_cols))
+  
+  # Calculate stats for the patient
+  pat_stats <- calculate_cv_for_patient(pat_data)
+  
+  # Calculate the average CV and mean for this patient and store it
+  average_cv <- mean(pat_stats$CV, na.rm = TRUE)
+  average_mean <- mean(pat_stats$Mean, na.rm = TRUE)
+  average_cv_list[[pat]] <- average_cv
+  average_mean_list[[pat]] <- average_mean
+}
+
+# Convert the list to a data frame for plotting
+average_cv_df <- data.frame(
+  Patient = names(average_cv_list),
+  Average_CV = unlist(average_cv_list),
+  Average_Mean = unlist(average_mean_list)
+)
+
+# Plot the average CV for all patients
+p1 <- ggplot(average_cv_df, aes(x = Patient, y = Average_CV, fill = Patient)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Average Coefficient of Variation (CV) for Each Patient Group",
+       x = "Patient Group",
+       y = "Average CV") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set3")
+
+print(p1)
+
+
+```
+
+
+```{r}
+# Plot the average CV for all patients
+p2 <- ggplot(average_cv_df, aes(x = Patient, y = Average_Mean, fill = Patient)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = " Mean Expression for Each Patient Group",
+       x = "Patient Group",
+       y = "Mean") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set3")
+
+print(p2)
+
+
+```
+
+
+```{r}
+# Plot the CV distribution for each patient
+for (pat in names(cv_data_frames)) {
+  p <- ggplot(cv_data_frames[[pat]], aes(x = CV)) +
+    geom_histogram(binwidth = 0.1, fill = "blue", color = "black") +
+    labs(title = paste("Histogram of CV across Genes for", pat),
+         x = "Coefficient of Variation (CV)",
+         y = "Frequency") +
+    theme_minimal()
+  
+  print(p)  
+}
+```
+
+
+
+
+```{r}
+#checking if lowely expressed genes indeed have high CV 
+library(dplyr)
+library(readr)
+
+# Function to calculate CV for a given patient group and filter genes with CV > 1
+calculate_and_filter_cv_for_patient <- function(all_data1) {
+  # Removing the genes with 0 counts in all patient samples
+  filtered_dataa <- all_data1 %>%
+    filter(rowSums(select(., -Gene) != 0) > 0)
+  
+  # Removing the genes with less than 10 counts in all the samples
+  filtered_dataa <- filtered_dataa %>%
+    filter(rowSums(select(., -Gene) >= 10) > 0)
+  
+  # Calculation of mean, variance, and CV
+  pat_statss <- filtered_dataa %>%
+    rowwise() %>%
+    mutate(Mean = mean(c_across(-Gene), na.rm = TRUE),
+           Variance = var(c_across(-Gene), na.rm = TRUE),
+           CV = sqrt(Variance) / Mean) %>%
+    ungroup()
+  
+  # Filter genes with CV > 1
+  filtered_pat_statss <- pat_statss %>%
+    filter(CV > 1)
+  
+  return(filtered_pat_statss)
+}
+
+# Load the data for all patients
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+all_data1 <- read_xlsx(file_path)
+
+# Fetch the column names
+col_names <- colnames(all_data1)
+
+# Create an empty list to store the filtered CV data frames for each patient
+filtered_cv_data_frames <- list()
+
+# Loop through each unique patient identifier
+for (pat in unique(gsub("_Sam.*", "", col_names[-1]))) {
+  # Select the columns related to the patient data
+  pat_cols <- col_names[grep(paste0("^", pat, "_"), col_names)]
+  
+  # Create a subset of the data for the specific patient
+  pat_dataa <- all_data1 %>%
+    select(Gene, all_of(pat_cols))
+  
+  # Calculate CV for the patient and filter genes with CV > 1
+  filtered_cv_data_frames[[pat]] <- calculate_and_filter_cv_for_patient(pat_dataa)
+}
+
+# The filtered_cv_data_frames list now contains 10 different data frames, one for each patient, with genes that have CV > 1
+
+# You can access each data frame like this:
+print(filtered_cv_data_frames$Pat1)  # For Patient 1
+print(filtered_cv_data_frames$Pat2)  # For Patient 2
+print(filtered_cv_data_frames$Pat3)  # For Patient 1
+print(filtered_cv_data_frames$Pat4)  # For Patient 2
+print(filtered_cv_data_frames$Pat5)  # For Patient 1
+print(filtered_cv_data_frames$Pat6)  # For Patient 2
+print(filtered_cv_data_frames$Pat7)  # For Patient 1
+print(filtered_cv_data_frames$Pat8)  # For Patient 2
+print(filtered_cv_data_frames$Pat9)  # For Patient 1
+print(filtered_cv_data_frames$Pat10)  # For Patient 2
+# and so on...
+
+
+```
+
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(readxl)
+
+# Function to calculate CV for a given patient group without filtering
+calculate_cv_for_patient <- function(all_data1, pat) {
+  # Removing the genes with 0 counts in all patient samples
+  filtered_dataa <- all_data1 %>%
+    filter(rowSums(select(., -Gene) != 0) > 0)
+  
+  # Removing the genes with less than 10 counts in all the samples
+  filtered_dataa <- filtered_dataa %>%
+    filter(rowSums(select(., -Gene) >= 20) > 0)
+  
+  # Calculation of mean, variance, and CV
+  pat_statss <- filtered_dataa %>%
+    rowwise() %>%
+    mutate(Mean = mean(c_across(-Gene), na.rm = TRUE),
+           Variance = var(c_across(-Gene), na.rm = TRUE),
+           CV = sqrt(Variance) / Mean,
+           Patient = pat) %>%  # Add the patient identifier as a new column
+    ungroup()
+  
+  return(pat_statss)
+}
+
+# Load the data for all patients
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+all_data1 <- read_xlsx(file_path)
+
+# Fetch the column names
+col_names <- colnames(all_data1)
+
+# Define a color palette
+unique_patients <- unique(gsub("_Sam.*", "", col_names[-1]))
+color_palette <- scales::brewer_pal(palette = "Set3")(length(unique_patients))
+
+# Loop through each unique patient identifier
+for (i in seq_along(unique_patients)) {
+  pat <- unique_patients[i]
+  
+  # Select the columns related to the patient data
+  pat_cols <- col_names[grep(paste0("^", pat, "_"), col_names)]
+  
+  # Create a subset of the data for the specific patient
+  pat_dataa <- all_data1 %>%
+    select(Gene, all_of(pat_cols))
+  
+  # Calculate CV for the patient without filtering
+  cv_data <- calculate_cv_for_patient(pat_dataa, pat)
+  
+  # Generate scatter plot for each patient group with log scales
+  p <- ggplot(cv_data, aes(x = Mean, y = CV)) +
+    geom_point(alpha = 0.7, color = color_palette[i]) +
+    scale_x_log10() +  # Log scale for x-axis (Mean Expression)
+    scale_y_log10() +  # Log scale for y-axis (CV)
+    theme_minimal() +
+    labs(title = paste("Log-Scale Scatter Plot of Mean Expression vs. CV for", pat),
+         x = "Mean Expression (log scale)",
+         y = "Coefficient of Variation (CV, log scale)") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  print(p)  
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
