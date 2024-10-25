@@ -1,0 +1,121 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Title : CRIS Classification for the In house Dataset. The classification was performed using the predictCRISclassKTSP function which categorizes the expression data into 5 different subtypes. CRISA, CRISB, CRISC, CRISD, and CRISE. 
+
+1. INSTALLING THE PACKAGES.
+
+```{r}
+
+library(readxl)
+library(dplyr)
+library(org.Hs.eg.db)
+library(openxlsx)
+
+#installing all the packages 
+new_lib_path <- "C:/Users/Vaishnavi Raikar/Documents/R/win-library/4.3-project"
+dir.create(new_lib_path, showWarnings = FALSE, recursive = TRUE)
+
+#setting the custom library path
+.libPaths(new_lib_path)
+
+install.packages("BiocManager", lib = new_lib_path)
+install.packages("remotes", lib = new_lib_path)
+
+#installing the CMSclassifier from GITHUB 
+remotes::install_github("Sage-Bionetworks/CMSclassifier", lib = new_lib_path)
+
+library(BiocManager, lib.loc = new_lib_path)
+library(CMSclassifier, lib.loc = new_lib_path)
+
+#devtoolsinstallation
+if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools")
+}
+
+#installing CMScaller package from GitHub
+devtools::install_github("Lothelab/CMScaller")
+
+# Load necessary libraries
+library(CMScaller)
+
+#installing of other necessary packages and the CRISclassifier package. 
+if (!requireNamespace("writexl", quietly = TRUE)) install.packages("writexl")
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+
+library(readxl)
+library(writexl)
+library(dplyr)
+library(CRISclassifier)
+
+```
+
+2. PERFORMING THE CRIS CLASSIFICATION ON THE DATASET AS HERE WE DO NOT NEED CONVERSION OF THE GENE SYMBOLS TO ENTREZ IDS.
+
+```{r}
+
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+
+final_data <- read_excel(file_path)
+
+#converting the data into a tibble
+final_data_1 <- as_tibble(final_data)
+
+#then to a dataframe to set row names
+final_data_1 <- as.data.frame(final_data_1)
+
+#setting the Entrez ID as row names
+rownames(final_data_1) <- final_data$Gene
+final_data_1 <- final_data_1 %>% dplyr::select(-Gene)
+
+#matrix conversion
+expression_matrix_1 <- as.matrix(final_data_1)
+
+#performing the CRIS classification using predictCRISclassKTSP function
+cris_results <- predictCRISclassKTSP(expression_matrix_1)
+
+print(cris_results)
+
+```
+
+3. PLOTTING THE BAR PLOT FOR EACH PATIENT WITH THE COUNT OF SAMPLES BEING CLASSIFIED AS ANY OF THE FIVE CRIS CATEGORIES.
+
+```{r}
+
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+library(readxl)
+
+install.packages("ggplot2")
+library("ggplot2")
+
+if (!requireNamespace("tidyr", quietly = TRUE)) install.packages("tidyr")
+library(tidyr)
+
+#uploading the cris_plot excel sheet where I stored the counts for each patient.
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/cris_plot.xlsx"
+
+cris_results <- read_xlsx(file_path)
+
+#reshaping the data for plotting
+cris_long <- cris_results %>%
+  pivot_longer(cols = c(starts_with("CRIS"), "NA"), names_to = "CRIS", values_to = "Count")
+
+#defining the colors for each CRIS group
+cris_colors <- c("CRISA" = "#1f77b4", "CRISB" = "#ff7f0e", "CRISC" = "#2ca02c", "CRISD" = "#d62728", "CRISE" = "pink", "NA" = "grey")
+
+#creating the bar plot
+ggplot(cris_long, aes(x = Sample_Names, y = Count, fill = CRIS)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cris_colors) +
+  labs(title = "CRIS Counts per Patient Group",
+       x = "Patient Group",
+       y = "Count",
+       fill = "CMS") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
