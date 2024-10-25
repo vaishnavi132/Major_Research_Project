@@ -294,6 +294,9 @@ for (sample in selected_samples) {
 common_genes_cvs[is.na(common_genes_cvs)] <- 0
 print(common_genes_cvs)
 
+# Assuming final_data is your DataFrame
+write.csv(final_data, "C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.csv", row.names = FALSE)
+
 # Load necessary libraries
 library(ggplot2)
 
