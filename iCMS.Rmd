@@ -1,0 +1,92 @@
+------------------------------------------------------------------------
+
+title: "R Notebook" output: html_notebook
+
+Title : Performing the iCMS classification on the In-house dataset using the iCMS.SSC package from Github.
+
+1.  INSTALLING THE PACKAGES FOR iCMS CLASSIFICATION.
+
+```{r}
+if(!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+}
+library(devtools)
+
+# Install the package from GitHub
+devtools::install_github('CRCrepository/iCMS.SSC', force = TRUE)
+
+```
+
+2.  PERFORMING THE iCMS CLASSIFICATION ON THE DATASET AS HERE WE DO NOT NEED CONVERSION OF THE GENE SYMBOLS TO ENTREZ IDS.
+
+```{r}
+library(readxl)
+library(writexl)
+library(dplyr)
+library(iCMS.SSC)
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+
+final_data <- read_excel(file_path)
+
+#converting the data into a tibble
+final_data_1 <- as_tibble(final_data)
+
+#then to a dataframe to set row names
+final_data_1 <- as.data.frame(final_data_1)
+
+#checking if there are any non-numeric columns (excluding the gene column)
+final_data_1[-1] <- lapply(final_data_1[-1], function(x) as.numeric(as.character(x)))
+
+#setting the row names to gene symbols and remove the gene column
+rownames(final_data_1) <- final_data_1$Gene
+final_data_1 <- final_data_1 %>% dplyr::select(-Gene)
+
+#matrix conversion
+expression_matrix <- as.matrix(final_data_1)
+
+#performing the iCMS classification on the entire matrix
+icms_results <- iCMS.KNN(expression_matrix, jobs = 1)
+
+
+print(icms_results)
+
+```
+
+3.  PLOTTING THE BAR PLOT FOR EACH PATIENT WITH THE COUNT OF SAMPLES BEING CLASSIFIED AS ANY OF THE TWO iCMS CATEGORIES.
+
+```{r}
+
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+library(readxl)
+
+install.packages("ggplot2")
+library("ggplot2")
+
+if (!requireNamespace("tidyr", quietly = TRUE)) install.packages("tidyr")
+library(tidyr)
+
+#uploading the iCMS_plot excel sheet where I stored the counts for each patient.
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/iCMS_plot.xlsx"
+
+icms_results <- read_xlsx(file_path)
+
+#plotting the data 
+icms_long <- icms_results %>%
+  pivot_longer(cols = c(starts_with("iCMS"), "NA"), names_to = "iCMS", values_to = "Count")
+
+#defining the colors for the classification 
+icms_colors <- c("iCMS2" = "#1f77b4", "iCMS3" = "yellow", "NA" = "grey" ) 
+
+#plotting the bar plot
+ggplot(icms_long, aes(x = Sample_Names, y = Count, fill = iCMS)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = icms_colors) +
+  labs(title = "ICMS Counts per Patient Group",
+       x = "Patient Group",
+       y = "Count",
+       fill = "CMS") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
