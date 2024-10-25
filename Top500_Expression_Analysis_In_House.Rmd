@@ -1,0 +1,478 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Title : CONTINUING THE EXPRESSION ANALYSIS FOR THE TOP 500 GENES WITH HIGHEST CV. 
+
+1. PERFORMING LOOCV ( LEAVE OUT ONE COEFFICIENT OF VARIATION )
+
+1. Expression analysis for the top 500 genes with the highest CV. 
+2. Performing the LOOCV for each patient to understand if there is a striking variation due to any of the patient samples in each patient. 
+3. For every iteration , one sample is being left out and the CV is calculated based on the rest of the patient samples. 
+
+Note : the steps are repeated for filtering the data and the CV for a better understanding. The only changes are with respect to each blocks title. 
+
+```{r}
+library(dplyr)
+library(readxl)
+
+# Load the dataset
+input_file <- "c:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - vaishnavi/In house dataset.xlsx"
+input_data <- read_xlsx(input_file)
+
+#removing the genes with 0 counts for the expression. 
+filtered_data <- input_data %>%
+  filter(rowSums(across(where(is.numeric))) > 0)
+
+#filtering criteria for low expression genes or low variance genes
+filtered_data <- filtered_data %>%
+  filter_if(is.numeric, all_vars(. > 20))  #Filter for genes with expression > 20
+
+#extracting the patient identifiers.
+patient_groups <- unique(gsub("_Sam.*", "", colnames(filtered_data)[-1]))
+
+#initializing a list to store the LOOCV data frames
+loocv_dfs <- list()
+average_cv_dfs <- data.frame()
+
+#then calculate the mean, variance, and CV
+calculate_stats <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(
+      Mean = mean(c_across(where(is.numeric)), na.rm = TRUE),
+      Variance = var(c_across(where(is.numeric)), na.rm = TRUE),
+      CV = ifelse(Mean == 0, NA, sqrt(Variance) / Mean)  
+    ) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+#looping through each patient group to perform LOOCV
+for (pat in patient_groups) {
+  #matching the samples for each patient
+  pat_data_filtered <- filtered_data %>%
+    dplyr::select(Gene, matches(paste0("^", pat, "_Sam")))
+
+  #getting the column names corresponding to the patient samples
+  pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_Sam"), colnames(pat_data_filtered))]
+  
+  #initialising a list to store CV values for each LOOCV iteration
+  cv_values <- list()
+  
+  #performing LOOCV for each sample in the patient group
+  for (i in seq_along(pat_columns)) {
+    # Exclude one sample at a time
+    loocv_data <- pat_data_filtered %>% dplyr::select(-all_of(pat_columns[i]))
+    
+    #calculating the Mean, Variance, and CV for the remaining samples
+    stats <- calculate_stats(loocv_data)
+    
+    #filtering out the genes with mean expression less than 100
+    stats_filtered <- stats %>%
+      filter(Mean >= 100)
+    
+    #selecting only the top 500 genes with the highest CV
+    top_stats <- stats_filtered %>%
+      arrange(desc(CV)) %>%
+      slice_head(n = 500)
+    
+    #saving the CV values with the sample name left out in the label
+    if (nrow(top_stats) > 0) {  # Ensure we have data before proceeding
+      cv_column_name <- paste(pat_columns[i], "CV", sep = "_")
+      loocv_dfs[[cv_column_name]] <- top_stats$CV
+      cv_values[[cv_column_name]] <- top_stats$CV
+    }
+  }
+  
+  #combining the CV values into a data frame if there are CV values
+  if (length(cv_values) > 0) {
+    cv_df <- as.data.frame(cv_values)
+    
+    #calculating the average CV for each LOOCV
+    avg_cv <- colMeans(cv_df, na.rm = TRUE)
+   
+    if (length(avg_cv) > 0) {
+      #combing the average CV into the result data frame
+      avg_cv_df <- data.frame(Patient = pat, Sample = names(avg_cv), Avg_CV = avg_cv)
+      
+      average_cv_dfs <- rbind(average_cv_dfs, avg_cv_df)
+    }
+  }
+}
+
+```
+
+
+2. PLOTTING THE LOOCV PLOT AND AVERAGE CV AFTER LOOCV. 
+
+```{r}
+install.packages("RColorBrewer")
+library(RColorBrewer)
+library(ggplot2)
+
+average_cv_dfs$Sample <- factor(average_cv_dfs$Sample, levels = unique(average_cv_dfs$Sample))
+
+#defining the set of color palette for the LOOCV plot
+my_colors <- brewer.pal(5, "Dark2")
+
+#plotting the samples
+ggplot(average_cv_dfs, aes(x = Patient, y = Avg_CV, color = Sample)) +
+  geom_point(size = 3, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Average CV per Patient", 
+       x = "Patient", 
+       y = "Average CV") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_manual(values = rep(my_colors, length.out = length(unique(average_cv_dfs$Sample))))
+
+
+#creating a new data frame to store overall averages for each patient
+overall_avg_cv <- average_cv_dfs %>%
+  group_by(Patient) %>%
+  summarise(Overall_Avg_CV = mean(Avg_CV, na.rm = TRUE))
+
+#using a larger palette 
+ggplot(overall_avg_cv, aes(x = Patient, y = Overall_Avg_CV, fill = Patient)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  theme_minimal() +
+  labs(title = "Overall Average CV for Each Patient - after LOOCV", 
+       x = "Patient", 
+       y = "Overall Average CV") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set3")  # Using a larger color palette
+
+
+
+```
+
+
+3. ONLY PERFORMING LOOCV FOR PAT_1 AND PAT_3 BECAUSE THESE PATIENTS SHOWED CLEAR OUTLIERS AND FOR THE REST OF THE PATIENTS THE CV IS CALCULATED OVERALL. NEXT, THE DATAFRAMES ARE PRINTED WITH PAT_1 ONLY WITH 4 SAMPLES BY REMOVING THE OLUTLIER PATIENT SAMPLE. SIMILARILY FOR PAT_3. 
+
+```{r}
+library(dplyr)
+library(readxl)
+
+# Loading the dataset
+input_file <- "c:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/In house dataset.xlsx"
+input_data <- read_xlsx(input_file)
+
+numeric_columns <- input_data %>%
+  select(where(is.numeric))  
+
+#rowSums to only numeric columns
+filtered_data <- input_data %>%
+  filter(rowSums(numeric_columns) > 0)
+
+
+filtered_data <- filtered_data %>%
+  filter_if(is.numeric, all_vars(. > 20))
+
+patient_groups <- unique(gsub("_Sam.*", "", colnames(filtered_data)[-1]))
+
+#Initializing the list to store the LOOCV data frames
+loocv_dfs <- list()
+
+#then calculate the mean, variance, and CV
+calculate_stats <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(
+      Mean = mean(c_across(where(is.numeric)), na.rm = TRUE),
+      Variance = var(c_across(where(is.numeric)), na.rm = TRUE),
+      CV = ifelse(Mean == 0, NA, sqrt(Variance) / Mean)  # Avoid division by zero
+    ) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+#looping through each patient group
+for (pat in patient_groups) {
+ 
+  pat_data_filtered <- filtered_data[, c(1, grep(paste0("^", pat, "_Sam"), colnames(filtered_data)))]
+  
+  if (pat %in% c("Pat1", "Pat3")) {
+    # only perform LOOCV for Pat1 and Pat3
+    pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_Sam"), colnames(pat_data_filtered))]
+    cv_values <- list()
+    
+    for (i in seq_along(pat_columns)) {
+      # Use base R to exclude one sample at a time
+      loocv_data <- pat_data_filtered[, -which(colnames(pat_data_filtered) == pat_columns[i])]
+      
+      #checking if loocv_data has any rows left before proceeding
+      if (ncol(loocv_data) > 1) {
+        stats <- calculate_stats(loocv_data)
+        stats_filtered <- stats %>% filter(Mean >= 100)
+      
+        if (nrow(stats_filtered) > 0) {
+          top_stats <- stats_filtered %>%
+            arrange(desc(CV)) %>%
+            slice_head(n = 500)
+          
+          #saving the CV values with proper name
+          cv_column_name <- paste(pat, "CV", i, sep = "_")
+          loocv_dfs[[cv_column_name]] <- top_stats
+        }
+      }
+    }
+    
+  } else {
+    # Calculating the mean, variance, CV for the rest of the patients
+    if (ncol(pat_data_filtered) > 1) {
+      stats <- calculate_stats(pat_data_filtered)
+      stats_filtered <- stats %>% filter(Mean >= 100)
+      
+      #Ensuring there are filtered results before proceeeding
+      if (nrow(stats_filtered) > 0) {
+        top_stats <- stats_filtered %>%
+          arrange(desc(CV)) %>%
+          slice_head(n = 500)
+        
+        #saving the top 500 genes with the highest CV
+        loocv_dfs[[paste(pat, "Overall", sep = "_")]] <- top_stats
+      }
+    }
+  }
+}
+
+#printing the dataframes
+selected_samples <- c("Pat1_CV_4", "Pat3_CV_1", "Pat2_Overall", "Pat4_Overall", 
+                      "Pat5_Overall", "Pat6_Overall", "Pat7_Overall", 
+                      "Pat8_Overall", "Pat9_Overall", "Pat10_Overall")
+
+for (sample in selected_samples) {
+  cat(paste("Data Frame for", sample, ":\n"))
+  
+  if (!is.null(loocv_dfs[[sample]])) {
+    print(loocv_dfs[[sample]])
+  } else {
+    cat("No data available for this sample.\n")
+  }
+  cat("\n")  
+}
+
+
+
+```
+
+
+4. IDENTIFYING THE RECURRENT GENES IN ALL THESE PATIENTS. SO IF THE GENE IS OCCURING IN MORE THAN 3 PATIENTS , THE GENE IS PRINTED. 
+
+
+```{r}
+# 1.combining the gene lists from selected samples into a single data frame
+all_genes <- bind_rows(lapply(selected_samples, function(sample) {
+  data.frame(Gene = loocv_dfs[[sample]]$Gene, Patient = sample)
+}))
+
+# 2.identifying the common genes that appear in at least 3 different patient samples
+common_genes <- all_genes %>%
+  group_by(Gene) %>%
+  summarize(Count = n_distinct(Patient)) %>%
+  filter(Count >= 3) %>%
+  arrange(desc(Count))
+
+# 3.storing the common genes by initialising a new dataframe 
+common_genes_cvs <- data.frame(Gene = common_genes$Gene)
+
+# 4.looping through selected_samples and add the CV values for each common gene
+for (sample in selected_samples) {
+  # Extract the Gene and CV columns for the current sample
+  sample_df <- loocv_dfs[[sample]][, c("Gene", "CV")]
+  
+  #merging current sample's CV values into the common_genes_cvs dataframe
+  common_genes_cvs <- merge(common_genes_cvs, sample_df, by = "Gene", all.x = TRUE)
+  
+  #rennaming the CV column to correspond to the sample name
+  colnames(common_genes_cvs)[ncol(common_genes_cvs)] <- sample
+}
+
+# 5.replacing the NA values with 0 
+common_genes_cvs[is.na(common_genes_cvs)] <- 0
+print(common_genes_cvs)
+
+# Load necessary libraries
+library(ggplot2)
+
+```
+
+5. ( Additional analysis code ) : PLOTTING A HEATMAP TO CHECK THE RECURRENT GENES BETWEEN PAIR OF PATIENTS. 
+
+
+```{r}
+library(dplyr)
+library(readxl)
+library(tidyr)  
+
+#loading the dataset
+input_file <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+input_data <- read_xlsx(input_file)
+
+#filtering data to remove genes with 0 counts across all samples
+filtered_data <- input_data %>%
+  filter(rowSums(select(., where(is.numeric))) > 0)
+
+#filtering out genes with counts less than 20 in any patient sample
+filtered_data <- filtered_data %>%
+  filter_if(is.numeric, all_vars(. > 20))
+
+#unique patient identifiers
+patient_groups <- unique(gsub("_Sam.*", "", colnames(filtered_data)[-1]))
+
+#store the LOOCV data frames in a list
+loocv_dfs <- list()
+
+calculate_stats <- function(patient_data) {
+  #select only numeric columns for the calculations
+  numeric_patient_data <- patient_data %>% 
+    select(where(is.numeric))
+  
+  #calculate Mean, Variance, and CV
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(
+      Mean = ifelse(any(!is.na(c_across(all_of(colnames(numeric_patient_data))))),
+                    mean(c_across(all_of(colnames(numeric_patient_data))), na.rm = TRUE),
+                    NA),
+      Variance = ifelse(any(!is.na(c_across(all_of(colnames(numeric_patient_data))))),
+                        var(c_across(all_of(colnames(numeric_patient_data))), na.rm = TRUE),
+                        NA),
+      CV = ifelse(Mean == 0 | is.na(Mean), NA, sqrt(Variance) / Mean)
+    ) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+#loop through each patient group
+for (pat in patient_groups) {
+  pat_data_filtered <- filtered_data %>%
+    select(Gene, matches(paste0("^", pat, "_Sam")))
+  
+  if (pat %in% c("Pat1", "Pat3")) {
+    pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_Sam"), colnames(pat_data_filtered))]
+    
+    for (i in seq_along(pat_columns)) {
+      loocv_data <- pat_data_filtered %>% select(-all_of(pat_columns[i]))
+      stats <- calculate_stats(loocv_data)
+      stats_filtered <- stats %>% filter(Mean >= 100)
+      top_stats <- stats_filtered %>% arrange(desc(CV)) %>% slice_head(n = 500)
+      cv_column_name <- paste(pat, "CV", i, sep = "_")
+      loocv_dfs[[cv_column_name]] <- top_stats
+    }
+    
+  } else {
+    stats <- calculate_stats(pat_data_filtered)
+    stats_filtered <- stats %>% filter(Mean >= 100)
+    top_stats <- stats_filtered %>% arrange(desc(CV)) %>% slice_head(n = 500)
+    loocv_dfs[[paste(pat, "Overall", sep = "_")]] <- top_stats
+  }
+}
+
+#select the specific samples for further analysis
+selected_samples <- c("Pat1_CV_4", "Pat3_CV_1", "Pat2_Overall", "Pat4_Overall", 
+                      "Pat5_Overall", "Pat6_Overall", "Pat7_Overall", 
+                      "Pat8_Overall", "Pat9_Overall", "Pat10_Overall")
+
+#extracting  the gene lists
+gene_lists <- lapply(selected_samples, function(sample) loocv_dfs[[sample]]$Gene)
+
+#combining all the gene lists into a single data frame with patient information
+all_genes <- bind_rows(lapply(selected_samples, function(sample) {
+  data.frame(Gene = loocv_dfs[[sample]]$Gene, Patient = sample)
+}))
+
+#finding genes that are present in more than one patient
+recurrent_genes <- all_genes %>%
+  group_by(Gene) %>%
+  summarize(Count = n_distinct(Patient)) %>%
+  filter(Count > 1) %>%
+  arrange(desc(Count))
+
+#preparing the data for the heatmap
+heatmap_data <- all_genes %>%
+  filter(Gene %in% recurrent_genes$Gene) %>%
+  mutate(Present = 1) %>%
+  pivot_wider(names_from = Patient, values_from = Present, values_fill = 0)
+
+#converting the data frame to a matrix for the heatmap
+gene_matrix <- as.matrix(heatmap_data[,-1])  # Remove the Gene column
+
+#setting the row names to the Gene names
+rownames(gene_matrix) <- heatmap_data$Gene
+
+
+install.packages("pheatmap")
+library(pheatmap)
+#preparing the data for the heatmap by finding intersections between each pair of patients
+patient_pairs <- combn(selected_samples, 2, simplify = FALSE)
+
+#Initializing a matrix to store the number of shared genes between patients
+shared_genes_matrix <- matrix(0, nrow = length(selected_samples), ncol = length(selected_samples))
+rownames(shared_genes_matrix) <- selected_samples
+colnames(shared_genes_matrix) <- selected_samples
+
+#filling the matrix with the number of shared genes
+for (pair in patient_pairs) {
+  patient1_genes <- loocv_dfs[[pair[1]]]$Gene
+  patient2_genes <- loocv_dfs[[pair[2]]]$Gene
+  shared_genes <- length(intersect(patient1_genes, patient2_genes))
+  
+  shared_genes_matrix[pair[1], pair[2]] <- shared_genes
+  shared_genes_matrix[pair[2], pair[1]] <- shared_genes  # Symmetric matrix
+}
+
+diag(shared_genes_matrix) <- 500
+
+#defining a color palette where 500 is white, and the rest follows a smooth gradient
+color_palette <- c("white", colorRampPalette(c("lavender", "violet", "white"))(49))
+
+
+breaks_list <- c(seq(0, 499, length.out = 50), 500)
+
+#creating the heatmap with the adjusted gradient
+pheatmap(shared_genes_matrix,
+         cluster_rows = FALSE,   
+         cluster_cols = FALSE,   
+         color = color_palette,  
+         breaks = breaks_list,   
+         display_numbers = TRUE, 
+         main = "Intersection of Top-CV Genes Between Patients")
+
+
+```
+
+6. PLOTTING A HISTOGRAM TO SEE HOW MANY TIMES EACH GENE APPEARS ACROSS THE SELECTED PATIENTS. 
+
+```{r}
+#extracting the gene columns from each of the selected samples
+gene_lists <- lapply(selected_samples, function(sample) loocv_dfs[[sample]]$Gene)
+
+#combining the genes into a single data frame with a column indicating the patient
+all_genes <- bind_rows(lapply(selected_samples, function(sample) {
+  data.frame(Gene = loocv_dfs[[sample]]$Gene, Patient = sample)
+}))
+
+#counting how many times each gene appears across the selected patients
+gene_recurrence <- all_genes %>%
+  group_by(Gene) %>%
+  summarize(Recurrence = n_distinct(Patient))
+#lastly plotting histogram with correct binwidth and integer x-axis
+ggplot(gene_recurrence, aes(x = Recurrence)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(1, max(gene_recurrence$Recurrence), by = 1)) +  # Ensure whole numbers on x-axis
+  labs(title = "Histogram of Gene Recurrence Across Patients",
+       x = "Number of Patients",
+       y = "Number of Genes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+
+
+
