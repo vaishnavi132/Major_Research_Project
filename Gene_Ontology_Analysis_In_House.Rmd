@@ -1,0 +1,271 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Title : GENE ONTOLOGY ANALYSIS FOR THE IN HOUSE DATASET 
+
+
+1. General Go Ontology analysis for the common genes - with respect to each ontology category ( Molecular Function , Biological Processes , and the Cellular Component). 
+2. Performing the enrichment analysis using Enrichr. 
+
+```{r}
+#installing the package for enrichr database. 
+if (!requireNamespace("enrichR", quietly = TRUE)) {
+  install.packages("enrichR")
+}
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+
+library(enrichR)
+library(dplyr)
+library(ggplot2)
+
+#the common genes were stored 
+# Load the dataset
+input_file <- "C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.csv"
+gene_list <- read.csv(input_file)
+
+#converting the gene symbols into a vector
+genes <- as.character(gene_list$Gene)
+
+#chosing the GO databases to use
+dbs <- c("GO_Biological_Process_2023", "GO_Molecular_Function_2023", "GO_Cellular_Component_2023")
+
+# Perform the enrichment analysis for the GO terms 
+enrichment_results <- enrichR::enrichr(genes, dbs)
+
+go_bp_results <- enrichment_results[["GO_Biological_Process_2023"]]
+go_mf_results <- enrichment_results[["GO_Molecular_Function_2023"]]
+go_cc_results <- enrichment_results[["GO_Cellular_Component_2023"]]
+
+
+#filetring all GO terms with Adjusted.P.value < 0.01 for each category
+
+top_mf <- go_mf_results %>%
+  filter(Adjusted.P.value < 0.01) %>%  
+  arrange(Adjusted.P.value) %>%
+  mutate(Category = "Biological Process")
+
+# Filter and mutate for Molecular Function GO terms
+top_bp <- go_bp_results %>%
+  as.data.frame() %>%  # Ensure it's treated as a data frame
+  filter(Adjusted.P.value < 0.01) %>%
+  arrange(Adjusted.P.value) %>%
+  head(20) %>%
+  mutate(Category = "Molecular Function")
+
+top_cc <- go_cc_results %>%
+  filter(Adjusted.P.value < 0.01) %>%  
+  arrange(Adjusted.P.value) %>%
+  mutate(Category = "Cellular Component")
+
+#visualizing GO Term and Pathway results
+
+#Biological Process plot
+bp_plot <- ggplot(top_bp, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = Category)) +
+  geom_bar(stat = "identity", fill = "blue") +  
+  coord_flip() +
+  labs(title = "GO Terms vs Adj p-values - (BP)", 
+       x = "GO Term", 
+       y = "-log10(Adjusted P-value)") +
+  theme_minimal() +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = 45, hjust = 1), 
+        plot.title = element_text(hjust = 0.5, size = 8))
+
+#Molecular Function plot
+mf_plot <- ggplot(top_mf, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = Category)) +
+  geom_bar(stat = "identity", fill = "orange") +  
+  coord_flip() +
+  labs(title = "GO Terms vs Adj P-value (MF)", 
+       x = "GO Term", 
+       y = "-log10(Adj P-value)") +
+  theme_minimal() +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = 45, hjust = 1),  
+        axis.text.y = element_text(size = 8),               
+        plot.title = element_text(hjust = 0.5, size = 10),  
+        axis.title.x = element_text(size = 9),              
+        axis.title.y = element_text(size = 9)) +            
+  ylim(0, 6) 
+
+#Cellular Component plot
+cc_plot <- ggplot(top_cc, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = Category)) +
+  geom_bar(stat = "identity", fill = "green") +  
+  coord_flip() +
+  labs(title = "GO Terms vs Adjusted p-values (CC)", 
+       x = "GO Term", 
+       y = "-log10(Adjusted P-value)") +
+  theme_minimal() +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = 45, hjust = 1), 
+        plot.title = element_text(hjust = 0.5, size = 8))
+
+
+print(cc_plot)
+print(bp_plot)
+print(mf_plot)
+```
+
+2. PERFORMING THE KEGG ENRICHMENT ANALYSIS FOR QUERYING THE TOP ENRICHED PATHWAYS FOR THE COMMON GENES. 
+
+```{r}
+#installing the necessary pacakages 
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("clusterProfiler")
+BiocManager::install("org.Hs.eg.db")  #for human gene annotation
+BiocManager::install("pathview")      #for visualizing pathways
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(pathview)
+
+#common genes excel file 
+gene_data <- read.csv("C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.csv")
+
+gene_list <- as.character(gene_data$Gene)
+
+#converting the gene symbols to ENTREZ IDs (KEGG works with ENTREZ IDs)
+#ensuring that the gene names are valid and map them to ENTREZ IDs
+entrez_ids <- bitr(gene_list, fromType = "SYMBOL", 
+                   toType = "ENTREZID", 
+                   OrgDb = org.Hs.eg.db)
+
+#performing KEGG pathway enrichment analysis
+kegg_enrich <- enrichKEGG(gene = entrez_ids$ENTREZID,
+                          organism = 'hsa', # hsa refers to Homo sapiens
+                          pvalueCutoff = 0.01)
+
+#sorting the results by adjusted p-value (p.adjust) in ascending order
+kegg_enrich@result <- kegg_enrich@result[order(kegg_enrich@result$p.adjust), ]
+
+
+#plotting the KEGG pathway enrichment results 
+dotplot(kegg_enrich, showCategory = 20)
+```
+
+
+
+3. FETCHING THE GENES ASSOCIATED WITH EACH OF THE TOP 3 ENRICHED PATHWAYS WITH LOWEST ADJUSTED.P.VALUE.
+- All the genes are stored in the excel file called - "top_enriched_pathways_genes". 
+
+```{r}
+# Convert to dataframe
+df <- data.frame(kegg_enrich)
+
+#filtering for the row where ID is 'hsa04151'
+genes_cyto <- df[df$ID == "hsa04820", ]
+#filtering for the row where ID is 'hsa04151'
+genes_pi3k <- df[df$ID == "hsa04151", ]
+#filtering for the row where ID is 'hsa04151'
+genes_focal <- df[df$ID == "hsa04510", ]
+
+
+print(genes_cyto$geneID)
+
+print(genes_pi3k$geneID)
+
+print(genes_focal$geneID)
+
+```
+4. GO TERM ANALYSIS FOR THE GENES ASSOCIATED WITH EACH TOP 3 ENRICHED PATHWAYS 
+1. The code needs to be changed for every pathway because of the genes associated with it, so on the 191st line , it just needs to be df[[1]] if you want to see the go terms for the Cytoskeleton pathway, df[[2]] if you want to see the go terms for the Pi3k signaling pathway , and df[[3]] for the focal adhesion pathway. 
+
+
+
+```{r}
+
+library(readxl)
+
+#loading the dataset with the top enriched pathway genes 
+input_file <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top_enriched_pathways_genes.xlsx"
+df <- read_xlsx(input_file)
+
+#extracting the gene list from the first column (assuming it's named 'Gene' or similar)
+gene_list <- as.character(df[[2]])  #1 :  Extract the first column as gene list
+                                    #2 :  Extract the second column as gene list
+                                    #3 :  Extract the third column as gene list
+
+#connecting to Enrichr database and list available databases
+dbs <- listEnrichrDbs()
+
+#selecting the GO terms databases (BP, CC, MF)
+databases <- c("GO_Biological_Process_2023", "GO_Cellular_Component_2023", "GO_Molecular_Function_2023")
+
+#performing enrichment analysis using the gene list for selected GO categories
+enrichment_results <- enrichr(gene_list, databases)
+
+#printing and storing each GO category in a separate data frame
+go_bp_df <- as.data.frame(enrichment_results[["GO_Biological_Process_2023"]])
+go_cc_df <- as.data.frame(enrichment_results[["GO_Cellular_Component_2023"]])
+go_mf_df <- as.data.frame(enrichment_results[["GO_Molecular_Function_2023"]])
+
+
+#sorting the GO Biological Process dataframe by ascending p-adjusted values
+go_bp_df_sorted <- go_bp_df %>%
+  arrange(Adjusted.P.value)
+
+#sorting the GO Cellular Component dataframe by ascending p-adjusted values
+go_cc_df_sorted <- go_cc_df %>%
+  arrange(Adjusted.P.value)
+
+#sorting the GO Molecular Function dataframe by ascending p-adjusted values
+go_mf_df_sorted <- go_mf_df %>%
+  arrange(Adjusted.P.value)
+
+cat("GO Biological Process 2023 Results:\n")
+print(go_bp_df_sorted)
+
+cat("\nGO Cellular Component 2023 Results:\n")
+print(go_cc_df_sorted)
+
+cat("\nGO Molecular Function 2023 Results:\n")
+print(go_mf_df_sorted)
+
+
+
+```
+5. PLOTTING THE GO TERMS BASED ON THE GENES ASSOCIATED WITH EACH PATHWAY. 
+
+```{r}
+#creating a bar plot for the top 10 GO terms based on ascending adjusted p-values
+plot_go_terms <- function(go_df, title, color) {
+  #selecting the top 10 terms based on Adjusted P-value (smallest values)
+  top_go_df <- go_df[1:10,]
+  
+  #ensuring that the terms are ordered by ascending adjusted p-values (smallest p-value at top)
+  top_go_df <- top_go_df %>%
+    arrange(Adjusted.P.value)
+  
+  #Correctly order the factor levels for the terms to ensure smallest p-value is at the top
+  top_go_df$Term <- factor(top_go_df$Term, levels = rev(top_go_df$Term))
+  
+  # then creating the bar plot with ascending adjusted p-values, placing the smallest on top
+  ggplot(top_go_df, aes(x = Term, y = -log10(Adjusted.P.value))) +
+    geom_bar(stat = "identity", fill = color) +
+    coord_flip() +
+    labs(title = title, x = "GO Term", y = "-log10(Adjusted P-value)") +
+    theme_minimal(base_size = 10)
+}
+
+#plotting the bar plots for each category 
+plot_bp <- plot_go_terms(go_bp_df_sorted, "Top 10 GO Biological Process Terms", "skyblue")
+
+plot_cc <- plot_go_terms(go_cc_df_sorted, "Top 10 GO Cellular Component Terms", "lightgreen")
+
+plot_mf <- plot_go_terms(go_mf_df_sorted, "Top 10 GO Molecular Function Terms", "salmon")
+
+# Display the plots
+print(plot_bp)
+print(plot_cc)
+print(plot_mf)
+
+
+```
+
