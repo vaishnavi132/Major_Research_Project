@@ -1,0 +1,205 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Title : CMS classification for the In-house Dataset using CMScaller i.e. an R package for consensus molecular subtyping of colorectal cancer pre-clinical models. The package has been downloaded from the Lothelab in Github.
+
+1. INSTALLATION OF THE PACKAGES NEEDED FOR THE CMS CLASSIFICATION. 
+
+```{r}
+library(readxl)
+library(dplyr)
+library(org.Hs.eg.db)
+library(openxlsx)
+
+#installing all the packages 
+new_lib_path <- "C:/Users/Vaishnavi Raikar/Documents/R/win-library/4.3-project"
+dir.create(new_lib_path, showWarnings = FALSE, recursive = TRUE)
+
+#setting the custom library path
+.libPaths(new_lib_path)
+
+#installing BiocManager and remotes packages.
+install.packages("BiocManager", lib = new_lib_path)
+install.packages("remotes", lib = new_lib_path)
+
+#installing the CMSclassifier from GITHUB 
+remotes::install_github("Sage-Bionetworks/CMSclassifier", lib = new_lib_path)
+
+library(BiocManager, lib.loc = new_lib_path)
+library(CMSclassifier, lib.loc = new_lib_path)
+
+#installing the devtools package.
+if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools")
+}
+
+#installinhg CMScaller package from GitHub
+devtools::install_github("Lothelab/CMScaller")
+
+#loading the CMScaller library
+library(CMScaller)
+
+#installing the biomaRt package which will be needed further for the gene identifer conversion.
+BiocManager::install("biomaRt")
+
+#loading the biomart package as well.
+library(biomaRt)
+
+#loading the necessary packages for loading excel sheet and write the excel sheet as well.
+if (!requireNamespace("writexl", quietly = TRUE)) install.packages("writexl")
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+if (!requireNamespace("tidyr", quietly = TRUE)) install.packages("tidyr")
+install.packages("ggplot2")
+
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+2. CONVERTING THE GENE SYMBOLS TO ENTREZ IDS. 
+
+```{r}
+#loading the in-house dataset
+ file_path = "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset.xlsx"
+data <- read_excel(file_path)
+
+#extracting the gene symbols from the gene symbol column
+gene_symbols <- unique(data$Gene)
+
+#mapping the gene symbols to Entrez IDs using org.Hs.eg.db
+mapped_ids <- AnnotationDbi::select(org.Hs.eg.db,
+                                    keys = gene_symbols,
+                                    columns = c("SYMBOL", "ENTREZID"),
+                                    keytype = "SYMBOL")
+
+#handling multiple mappings by keeping the first occurrence for each SYMBOL
+mapped_ids_unique <- mapped_ids %>%
+  distinct(SYMBOL, .keep_all = TRUE)
+
+#removing the rows with NA Entrez IDs
+mapped_ids_clean <- mapped_ids_unique %>%
+  filter(!is.na(ENTREZID))
+
+#merging the Entrez IDs back with the original data
+merged_data <- left_join(data, mapped_ids_clean, by = c("Gene" = "SYMBOL"))
+
+#removing the rows with NA Entrez IDs from the merged data
+final_data <- merged_data %>%
+  filter(!is.na(ENTREZID))
+
+output_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset_converted.xlsx"
+write.xlsx(final_data, output_path) 
+
+```
+
+3. SETTING THE ENTREZ ID COLUMN AS ROW NAMES FOR THE CMS CLASSIFICATION.
+
+```{r}
+
+#converting the data to a tibble
+final_data_1 <- as_tibble(final_data)
+
+#moving the Entrez ID column to be the first column and removing the original Gene column
+final_data_1 <- final_data_1 %>%
+  dplyr::select(ENTREZID, everything(), -Gene)
+
+#converting the tibble to data frame to set row names
+final_data_1 <- as.data.frame(final_data_1)
+
+#finally setting the Entrez ID as row names
+rownames(final_data_1) <- final_data$ENTREZID
+final_data_1 <- final_data_1 %>% dplyr::select(-ENTREZID)
+
+
+```
+
+
+4. PERFORMING THE CMS CLASSIFICATION ON THE IN-HOUSE DATASET.
+
+```{r}
+
+#using the in house data again
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/In house dataset_converted.xlsx"
+final_data_1 <- read_xlsx(file_path)
+
+#converting to the dataframe
+final_data_1 <- as.data.frame(final_data_1)
+
+#removing the first column which is the gene column
+final_data_1 <- final_data_1[, -1]
+
+#setting the Entrez ID as row names and remove the Entrez ID column from the data
+rownames(final_data_1) <- final_data_1$ENTREZID
+final_data_1 <- final_data_1[, !(names(final_data_1) %in% "ENTREZID")]
+
+#converting the data into an expression matrix
+expression_matrix <- as.matrix(final_data_1)
+
+#performing the CMS classification using CMScaller
+cms_results <- CMScaller(expression_matrix, RNAseq = TRUE, doPlot = TRUE)
+
+#lastly extracting the CMS results. 
+cms_predictions <- cms_results$prediction
+
+
+```
+
+5. PLOTTING THE BAR PLOT FOR EACH PATIENT WITH THE COUNT OF SAMPLES BEING CLASSIFIED AS ANY OF THE FOUR CMS CATEGORIES.
+
+```{r}
+
+#using the CMS predictions and storing the counts for patient classification subtype in an excel sheet and then plotting the bar plot.
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/bar_plot.xlsx"
+cms_results <- read_xlsx(file_path)
+
+#reshaping the data for plotting
+cms_long <- cms_results %>%
+  pivot_longer(cols = c(starts_with("CMS"), "NA"), names_to = "CMS", values_to = "Count")
+
+#defining the colors for each CMS group
+cms_colors <- c("CMS1" = "#1f77b4", "CMS2" = "#ff7f0e", "CMS3" = "#2ca02c", "CMS4" = "#d62728", "NA" = "#808080")
+
+#creating the bar plot.
+ggplot(cms_long, aes(x = Sample_Names, y = Count, fill = CMS)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = cms_colors) +
+  labs(title = "CMS Counts per Patient Group",
+       x = "Patient Group",
+       y = "Count",
+       fill = "CMS") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+6. PLOTTING THE DOMINANT SUBTYPE FOR EACH PATIENT. 
+
+```{r}
+#defining the corrected dominant subtype data based on the observation meaning if a patient has high number of sample counts for CMS1  , then the dominant subtype will be CMS1.
+
+dominant_subtype <- data.frame(
+  Patient = c("Pat_1", "Pat_10", "Pat_2", "Pat_3", "Pat_4", "Pat_5", "Pat_6", "Pat_7", "Pat_8", "Pat_9"),
+  Dominant_CMS = c("CMS3", "CMS4", "CMS1", "CMS1", "CMS4", "CMS1", "CMS2", "CMS3", "None", "CMS4"),
+  Count = c(3, 4, 5, 5, 4, 2, 3, 5, 0, 4)  #counts per patient sample, so 3 means that there are 3 samples for Pat_1 which has CMS3 classification.
+)
+
+#creating the scatter plot with marker size based on the number of samples with dominant subtype
+ggplot(dominant_subtype, aes(x = Patient, y = Dominant_CMS, size = Count, color = Dominant_CMS)) +
+  geom_point() +
+  scale_size_continuous(range = c(3, 10)) +  # Adjust the size range of markers
+  labs(title = "Dominant CMS per Patient Group",
+       x = "Patient Group",
+       y = "Dominant CMS",
+       size = "Sample Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
