@@ -1,0 +1,210 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+1. INSTALLING THE CMS PACKAGE FOR EPICC DATA.  
+
+```{r}
+
+library(readxl)
+library(dplyr)
+library(org.Hs.eg.db)
+library(openxlsx)
+library(biomaRt)
+library(tidyr)
+
+#installing all the packages 
+new_lib_path1 <- "C:/Users/Vaishnavi Raikar/Documents/R/win-library/4.3-project"
+dir.create(new_lib_path1, showWarnings = FALSE, recursive = TRUE)
+
+#setting the custom library path
+.libPaths(new_lib_path1)
+
+install.packages("BiocManager", lib = new_lib_path1)
+install.packages("remotes", lib = new_lib_path1)
+
+#installing the CMSclassifier from GITHUB 
+remotes::install_github("Sage-Bionetworks/CMSclassifier", lib = new_lib_path1)
+
+library(BiocManager, lib.loc = new_lib_path1)
+library(CMSclassifier, lib.loc = new_lib_path1)
+
+if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools")
+}
+
+#CMScaller package from GitHub
+devtools::install_github("Lothelab/CMScaller")
+library(CMScaller)
+
+
+```
+
+2. INSTALLING THE PACKAGES FOR CONVERTING THE ENSEMBLE IDS TO ENTREZ IDS FOR EPICC DATA.
+
+```{r}
+
+#installing the bioconductor package 
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+
+#installation of the biomart package 
+BiocManager::install("biomaRt")
+
+#loading biomart package 
+library(biomaRt)
+
+if (!requireNamespace("writexl", quietly = TRUE)) install.packages("writexl")
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+if (!requireNamespace("tidyr", quietly = TRUE)) install.packages("tidyr")
+
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+
+```
+
+3. MAPPING THE ENSEMBL IDS TO ENTREZ IDS AND HANNDLING DUPLICATE IDS BY MERGING THE EXPRESSION VALUES ( BY TAKING THE AVERAGE ) OF THE ENSEMBLE IDS WHICH MAPS TO THE TWO ENTREZ IDS. 
+
+```{r}
+library(readxl)
+data <- read_excel("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/EPICC_dataset.xlsx")
+
+#connecting to ensembl via biomart
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+#extracting the unique Ensembl IDs from the dataset 
+ensembl_ids <- unique(data$GeneID)
+
+#mapping the Ensembl IDs to Entrez IDs using biomaRt
+mapped_ids <- getBM(
+  attributes = c('ensembl_gene_id', 'entrezgene_id'),
+  filters = 'ensembl_gene_id',
+  values = ensembl_ids,
+  mart = ensembl
+)
+
+#renaming the columns for consistency
+colnames(mapped_ids) <- c('GeneID', 'ENTREZID')
+
+#ensuring that ENTREZID is a character 
+mapped_ids$ENTREZID <- as.character(mapped_ids$ENTREZID)
+
+#removing the duplicates by keeping the first occurrence of each Ensembl ID to Entrez ID mapping
+mapped_ids_unique <- mapped_ids %>%
+  group_by(GeneID) %>%
+  summarise(ENTREZID = dplyr::first(ENTREZID)) %>%
+  ungroup()
+
+#removing the rows with NA Entrez IDs
+mapped_ids_clean <- mapped_ids_unique %>%
+  filter(!is.na(ENTREZID))
+
+#merging the Entrez IDs back with the original data using Ensembl IDs
+merged_data <- left_join(data, mapped_ids_clean, by = "GeneID")
+
+#averaging the expression values where multiple Ensembl IDs map to the same Entrez ID
+expression_cols <- names(data)[2:ncol(data)]  
+
+final_data <- merged_data %>%
+  group_by(ENTREZID) %>%
+  summarise(across(all_of(expression_cols), mean, na.rm = TRUE)) %>%
+  ungroup()
+
+output_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/EPICC_dataset_converted.xlsx"
+write.xlsx(final_data, output_path)
+
+```
+
+4. PERFORMING THE CMS CLASSIFICATION ON THE EPICC DATASET. 
+
+```{r}
+
+gene_ids <- final_data$ENTREZID
+
+#extracting the expression data apart from the first column. 
+expr_matrix <- as.matrix(final_data[, -1])
+
+#checking if the dimensions match 
+cat("Rows in expr_matrix: ", nrow(expr_matrix), "\n")
+cat("Length of gene_ids: ", length(gene_ids), "\n")
+
+#setting the row names of expr_matrix to the Entrez IDs
+rownames(expr_matrix) <- gene_ids
+
+#performing the CMS classification
+cms_results <- CMScaller(expr_matrix, RNAseq = TRUE, doPlot = TRUE)
+
+
+print(cms_results)
+
+
+```
+5. MAKING A TABLE WITH THE COUNT OF HOW MANY SAMPLES HAVE THE MOLECULAR SUBTYPES. 
+
+```{r}
+library(tidyr)
+
+#extracing the sample names from row_names 
+cms_results$Sample <- sub("_.*", "", rownames(cms_results))
+
+#replacing NA prediction with string "NA"
+cms_results$prediction <- as.character(cms_results$prediction)
+cms_results$prediction[is.na(cms_results$prediction)] <- "NA"
+
+#grouping by the sample and the CMS subtype prediction to count the occurrences
+cms_summary <- cms_results %>%
+  group_by(Sample, prediction) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  tidyr::spread(prediction, count, fill = 0)
+
+#filling missing CMS categories with zeros if they are missing in any sample
+expected_cms <- c("CMS1", "CMS2", "CMS3", "CMS4", "NA")
+for (cms in expected_cms) {
+  if (!cms %in% colnames(cms_summary)) {
+    cms_summary[[cms]] <- 0
+  }
+}
+
+#ungrouping the data before select() function
+#using dplyr::select() explicitly
+cms_summary <- cms_summary %>%
+  ungroup() %>%
+  dplyr::select(Sample, all_of(expected_cms)) 
+
+print(cms_summary)
+
+
+
+
+```
+
+
+
+```{r}
+library(ggplot2)
+#reshaping the data
+cms_long <- cms_summary %>%
+  pivot_longer(cols = -Sample, names_to = "CMS_Type", values_to = "Count")
+
+#creating the bar plot
+ggplot(cms_long, aes(x = Sample, y = Count, fill = CMS_Type)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "CMS classification plot for EPICC data", 
+       x = "Sample", 
+       y = "Count", 
+       fill = "CMS Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("CMS1" = "blue", "CMS2" = "violet", "CMS3" = "red", "CMS4" = "yellow", "NA" = "gray"))
+```
+
+
+
+
+
+
