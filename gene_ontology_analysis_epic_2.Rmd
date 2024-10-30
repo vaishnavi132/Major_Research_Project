@@ -1,0 +1,186 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Performing the gene expression analysis for the genes associated with the TGF BETA Pathway. 
+
+
+```{r}
+library(enrichR)
+library(dplyr)
+
+#FOR THE TGF BETA  PATHWAY 
+
+# Define the gene list as a character vector
+gene_list <- c("CDKN1A", "COL1A2", "ITGA2", "FN1", "RAC1", "MAPK14", "MAP3K7", "RNF111", "PML", "SKP1", "TGFBR2")
+
+# Connect to Enrichr database and list available databases
+dbs <- listEnrichrDbs()
+
+# Select the GO terms databases (BP, CC, MF)
+databases <- c("GO_Biological_Process_2023", "GO_Cellular_Component_2023", "GO_Molecular_Function_2023")
+
+# Perform enrichment analysis using the gene list for selected GO categories
+enrichment_results <- enrichr(gene_list, databases)
+
+# Extract and sort the GO Biological Process dataframe by ascending p-adjusted values
+go_bp_df <- as.data.frame(enrichment_results[["GO_Biological_Process_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Extract and sort the GO Cellular Component dataframe by ascending p-adjusted values
+go_cc_df <- as.data.frame(enrichment_results[["GO_Cellular_Component_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Extract and sort the GO Molecular Function dataframe by ascending p-adjusted values
+go_mf_df <- as.data.frame(enrichment_results[["GO_Molecular_Function_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Print the sorted data frames
+cat("GO Biological Process 2023 Results:\n")
+print(go_bp_df)
+
+cat("\nGO Cellular Component 2023 Results:\n")
+print(go_cc_df)
+
+cat("\nGO Molecular Function 2023 Results:\n")
+print(go_mf_df)
+
+
+top10_bp <- go_bp_df %>% head(10)
+top10_cc <- go_cc_df %>% head(10)
+top10_mf <- go_mf_df %>% head(10)
+
+
+bp_plot <- ggplot(top10_bp, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Biological Process")) +
+  geom_bar(stat = "identity", fill = "#66c2a5") +  # Choose a color for BP
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Biological Process",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  theme(plot.title = element_text(size = 8)) +  # Adjust title size here
+  scale_fill_manual(values = "#66c2a5")
+
+# Save the plot for Biological Process
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Biological_Process_2nd_pathway.png", plot = bp_plot, width = 8, height = 6, bg = "white")
+
+# Plot for top 10 GO Molecular Function with terms ordered by -log10(Adjusted.P.value)
+mf_plot <- ggplot(top10_mf, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Molecular Function")) +
+  geom_bar(stat = "identity", fill = "blue") +  
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Molecular Function",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "blue")
+
+# Save the plot for Molecular Function
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Molecular_Function_2nd_pathway.png", plot = mf_plot, width = 8, height = 6, bg = "white")
+
+# Plot for top 10 GO Cellular Component with terms ordered by -log10(Adjusted.P.value)
+cc_plot <- ggplot(top10_cc, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Cellular Component")) +
+  geom_bar(stat = "identity", fill = "#fc8d62") + 
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Cellular Component",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "#fc8d62")
+
+# Save the plot for Cellular Component
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Cellular_Component_2nd_pathway.png", plot = cc_plot, width = 8, height = 6, bg = "white")
+
+
+
+
+
+```
+2. Performing the gene expression analysis for the genes associated with the Chromosomal and Microsatellite Instability in Colorectal Cancer pathway. 
+
+```{r}
+#colon cancer pathway 
+# Define the correct gene list
+gene_list <- c("CDKN1A", "RALA", "CSNK1A1", "RAC1", "MLH1", "TGFBR2")
+
+
+# Connect to Enrichr database and list available databases
+dbs <- listEnrichrDbs()
+
+# Select the GO terms databases (BP, CC, MF)
+databases <- c("GO_Biological_Process_2023", "GO_Cellular_Component_2023", "GO_Molecular_Function_2023")
+
+# Perform enrichment analysis using the gene list for selected GO categories
+enrichment_results <- enrichr(gene_list, databases)
+
+# Extract and sort the GO Biological Process dataframe by ascending p-adjusted values
+go_bp_df <- as.data.frame(enrichment_results[["GO_Biological_Process_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Extract and sort the GO Cellular Component dataframe by ascending p-adjusted values
+go_cc_df <- as.data.frame(enrichment_results[["GO_Cellular_Component_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Extract and sort the GO Molecular Function dataframe by ascending p-adjusted values
+go_mf_df <- as.data.frame(enrichment_results[["GO_Molecular_Function_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Print the sorted data frames
+cat("GO Biological Process 2023 Results:\n")
+print(go_bp_df)
+
+cat("\nGO Cellular Component 2023 Results:\n")
+print(go_cc_df)
+
+cat("\nGO Molecular Function 2023 Results:\n")
+print(go_mf_df)
+
+
+top10_bp <- go_bp_df %>% head(10)
+top10_cc <- go_cc_df %>% head(10)
+top10_mf <- go_mf_df %>% head(10)
+
+
+bp_plot <- ggplot(top10_bp, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Biological Process")) +
+  geom_bar(stat = "identity", fill = "#66c2a5") +  # Choose a color for BP
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Biological Process",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  theme(plot.title = element_text(size = 8)) +  # Adjust title size here
+  scale_fill_manual(values = "#66c2a5")
+
+# Save the plot for Biological Process
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Biological_Process_3rd_pathway.png", plot = bp_plot, width = 8, height = 6, bg = "white")
+
+# Plot for top 10 GO Molecular Function with terms ordered by -log10(Adjusted.P.value)
+mf_plot <- ggplot(top10_mf, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Molecular Function")) +
+  geom_bar(stat = "identity", fill = "blue") +  
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Molecular Function",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "blue")
+
+# Save the plot for Molecular Function
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Molecular_Function_3rd_pathway.png", plot = mf_plot, width = 8, height = 6, bg = "white")
+
+# Plot for top 10 GO Cellular Component with terms ordered by -log10(Adjusted.P.value)
+cc_plot <- ggplot(top10_cc, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Cellular Component")) +
+  geom_bar(stat = "identity", fill = "#fc8d62") + 
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Cellular Component",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "#fc8d62")
+
+# Save the plot for Cellular Component
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Cellular_Component_3rd_pathway.png", plot = cc_plot, width = 8, height = 6, bg = "white")
+
+```
+
+
+
