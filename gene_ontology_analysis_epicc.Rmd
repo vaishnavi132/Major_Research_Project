@@ -1,0 +1,299 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Title : Gene Ontology Analysis for the EPICC dataset. 
+
+1. Removing the samples outliers for the first set of LOOCV code and printing those dataframes. 
+
+```{r}
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(viridis)
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/EPICC_genesymbols_cleaned.xlsx" 
+all_data_gene <- read_xlsx(file_path)
+
+#making the the last column the first, and drop the original first column
+all_data_gene <- all_data_gene[, c(ncol(all_data_gene), 2:(ncol(all_data_gene) - 1))]
+
+#filtering the dataset to keep only the highly expressed genes
+filtered_data <- all_data_gene %>%
+  rowwise() %>%
+  filter(sum(c_across(starts_with("C"))) > 0) %>%
+  filter(sum(c_across(starts_with("C"))) >= 30) %>%
+  filter(mean(c_across(starts_with("C")) > 50) >= 0.5) %>%
+  ungroup()  # Ungroup after rowwise operations
+
+#removing the patients C547 and C548 from the dataset
+filtered_data <- filtered_data %>%
+  dplyr::select(-contains("C547"), -contains("C548"), -contains("C555"), -contains("C519"), -contains("C536"), -contains("C562"))
+
+#extracting unique patient identifiers by taking the first part of the column names
+patient_groups <- unique(gsub("_.*", "", colnames(filtered_data)[-1]))
+
+#initialize a list to store the LOOCV data frames
+loocv_dfs <- list()
+
+#function to calculate the mean, variance, and CV for a given patient's data
+calculate_stats <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(
+      Mean = mean(c_across(where(is.numeric)), na.rm = TRUE),
+      Variance = var(c_across(where(is.numeric)), na.rm = TRUE),
+      CV = ifelse(Mean == 0, NA, sqrt(Variance) / Mean)  # Avoid division by zero
+    ) %>%
+    ungroup()  # Ungroup after calculations
+  
+  return(pat_stats)
+}
+
+#defining a list of patient-sample exclusions for LOOCV
+exclusions <- list(
+  C530 = "C530_B1_G1_CV",
+  C538 = "C538_C1_G1_CV",
+  C543 = "C543_B1_G10_CV",
+  C551 = "C551_A1_G5_CV",
+  C554 = "C554_C1_G3_CV",
+  C560 = "C560_B1_G4_CV",
+  C561 = "C561_E1_G1_CV",
+  C518 = "C518_B1_G1_CV",
+  C532 = "C532_D1_G2_CV",
+  C528 = "C528_C1_G2_CV"
+)
+#loop through all patient groups and perform LOOCV where necessary
+for (pat in patient_groups) {
+  # Match the samples for each patient
+  pat_data_filtered <- filtered_data %>%
+    dplyr::select(hgnc_symbol, matches(paste0("^", pat, "_")))
+  
+  #getting the column names corresponding to the patient samples
+  pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_"), colnames(pat_data_filtered))]
+  
+  #calculating the row-wise means (mean expression) across patient columns
+  row_means <- rowMeans(pat_data_filtered[, -1], na.rm = TRUE)
+  
+  #calculating the median of the row-wise means
+  median_threshold <- median(row_means, na.rm = TRUE)
+
+  #checking if there's an exclusion for this patient
+  if (!is.null(exclusions[[pat]])) {
+    #excluding the specific sample for LOOCV (only once)
+    loocv_data <- pat_data_filtered %>% ungroup() %>% dplyr::select(-contains(exclusions[[pat]]))
+  } else {
+    
+    loocv_data <- pat_data_filtered
+  }
+  
+  #checking if there are sufficient samples remaining to calculate CV
+  if (ncol(loocv_data) <= 2) {
+    message(paste("Skipping patient", pat, "due to insufficient samples for LOOCV."))
+    next
+  }
+  
+  #calculating Mean, Variance, and CV for the remaining samples
+  stats <- calculate_stats(loocv_data)
+  
+  #filtering out genes with mean expression less than the median threshold
+  stats_filtered <- stats %>%
+    filter(Mean >= median_threshold)
+  
+  #selecting only the top 500 genes with the highest CV
+  top_stats <- stats_filtered %>%
+    arrange(desc(CV)) %>%
+    slice_head(n = 500)
+
+  if (nrow(top_stats) > 0) {
+    cv_column_name <- paste(pat, "LOOCV_CV", sep = "_")
+    loocv_dfs[[cv_column_name]] <- top_stats$CV
+  }
+  
+  if (!is.null(loocv_dfs[[paste0(pat, "_LOOCV_CV")]])) {
+    print(paste("LOOCV data frame for patient:", pat))
+    print(top_stats) 
+  }
+}
+
+```
+
+2. FINDING THE RECURRENT GENES IN ALL THE DATAFRAMES. 
+
+Note : These genes have been stored into the excel file called: "common_genes_epicc" and has been added to the Github.
+
+
+```{r}
+library(dplyr)
+if (nrow(top_stats) > 0) {
+  cv_column_name <- paste(pat, "LOOCV_CV", sep = "_")
+  loocv_dfs[[cv_column_name]] <- top_stats %>% dplyr::select(hgnc_symbol, CV)
+}
+
+gene_lists <- lapply(loocv_dfs, function(df) {
+  if (is.data.frame(df) && "hgnc_symbol" %in% colnames(df)) {
+    return(df$hgnc_symbol)
+  } else {
+    return(NULL)
+  }
+})
+
+gene_lists <- Filter(Negate(is.null), gene_lists)
+
+#finding recurrent genes across all valid data frames
+if (length(gene_lists) > 0) {
+  recurrent_genes <- Reduce(intersect, gene_lists)
+  print("Recurrent genes across all LOOCV data frames:")
+  print(recurrent_genes)
+} else {
+  print("No valid data frames with 'hgnc_symbol' column found.")
+}
+
+
+```
+
+3. Performing the pathway analysis for the common genes using enrichR. 
+
+```{r}
+# Install required packages
+if (!requireNamespace("enrichR", quietly = TRUE)) {
+  install.packages("enrichR")
+}
+
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+
+# Load libraries
+library(enrichR)
+library(ggplot2)
+
+# Load your genes from the Excel file
+library(readxl)
+
+# Load the Excel file
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/common_genes_epicc.xlsx"  
+genes_df <- read_excel(file_path)
+
+# Assuming the gene names are in the first column
+gene_list <- genes_df[[1]]  # Adjust the column index if necessary
+
+# Perform enrichment analysis using Enrichr
+dbs <- listEnrichrDbs()
+db_to_use <- c("WikiPathways_2024_Human")
+
+enrichr_results <- enrichr(gene_list, db_to_use)
+
+# Extract the WikiPathways results for plotting
+wiki_results <- enrichr_results[["WikiPathways_2024_Human"]]
+
+# Sort the results by Adjusted P-value in ascending order
+sorted_wiki <- wiki_results[order(wiki_results$Adjusted.P.value), ]
+
+# Select the top pathways (e.g., top 10)
+top_wiki <- sorted_wiki[1:10, ]
+
+# Create a dot plot with Adjusted P-value on the x-axis
+ggplot(top_wiki, aes(x = reorder(Term, -Adjusted.P.value), y = -log10(Adjusted.P.value))) +
+  geom_point(aes(size = Combined.Score, color = Adjusted.P.value)) +
+  coord_flip() +
+  labs(x = "Pathway", y = "-log10(Adjusted P-value)", title = "Top 10 Enriched WikiPathways ") +
+  theme_minimal()
+
+
+
+```
+
+4. Performing the gene ontology analysis and plotting all the three categories for the genes enriched in the first pathway. 
+
+```{r}
+library(enrichR)
+library(dplyr)
+
+# Define the gene list as a character vector
+gene_list <- c("CASP7", "TRAF3", "TRAF2", "RAC1", "MAPK14", "MAP3K7", "BIRC3")
+
+# Connect to Enrichr database and list available databases
+dbs <- listEnrichrDbs()
+
+# Select the GO terms databases (BP, CC, MF)
+databases <- c("GO_Biological_Process_2023", "GO_Cellular_Component_2023", "GO_Molecular_Function_2023")
+
+# Perform enrichment analysis using the gene list for selected GO categories
+enrichment_results <- enrichr(gene_list, databases)
+
+# Extract and sort the GO Biological Process dataframe by ascending p-adjusted values
+go_bp_df <- as.data.frame(enrichment_results[["GO_Biological_Process_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Extract and sort the GO Cellular Component dataframe by ascending p-adjusted values
+go_cc_df <- as.data.frame(enrichment_results[["GO_Cellular_Component_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Extract and sort the GO Molecular Function dataframe by ascending p-adjusted values
+go_mf_df <- as.data.frame(enrichment_results[["GO_Molecular_Function_2023"]]) %>%
+  arrange(Adjusted.P.value)
+
+# Print the sorted data frames
+cat("GO Biological Process 2023 Results:\n")
+print(go_bp_df)
+
+cat("\nGO Cellular Component 2023 Results:\n")
+print(go_cc_df)
+
+cat("\nGO Molecular Function 2023 Results:\n")
+print(go_mf_df)
+
+```
+
+```{r}
+top10_bp <- go_bp_df %>% head(10)
+top10_cc <- go_cc_df %>% head(10)
+top10_mf <- go_mf_df %>% head(10)
+
+
+# Plot for top 10 GO Biological Process with terms ordered by -log10(Adjusted.P.value)
+bp_plot <- ggplot(top10_bp, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Biological Process")) +
+  geom_bar(stat = "identity", fill = "#66c2a5") +  # Choose a color for BP
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Biological Process",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "#66c2a5")
+
+# Save the plot for Biological Process
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Biological_Process_1st_pathway.png", plot = bp_plot, width = 8, height = 6, bg = "white")
+
+# Plot for top 10 GO Molecular Function with terms ordered by -log10(Adjusted.P.value)
+mf_plot <- ggplot(top10_mf, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Molecular Function")) +
+  geom_bar(stat = "identity", fill = "blue") +  
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Molecular Function",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "blue")
+
+# Save the plot for Molecular Function
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Molecular_Function_1st_pathway.png", plot = mf_plot, width = 8, height = 6, bg = "white")
+
+# Plot for top 10 GO Cellular Component with terms ordered by -log10(Adjusted.P.value)
+cc_plot <- ggplot(top10_cc, aes(x = reorder(Term, -log10(Adjusted.P.value)), y = -log10(Adjusted.P.value), fill = "Cellular Component")) +
+  geom_bar(stat = "identity", fill = "#fc8d62") + 
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 GO Cellular Component",
+       x = "GO Terms",
+       y = "-log10(Adjusted P-value)") +
+  scale_fill_manual(values = "#fc8d62")
+
+# Save the plot for Cellular Component
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/top10_GO_Cellular_Component_1st_pathway.png", plot = cc_plot, width = 8, height = 6, bg = "white")
+
+
+
+```
+
+
