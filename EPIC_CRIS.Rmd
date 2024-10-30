@@ -1,0 +1,341 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Title : CRISS CLASSIFICATION FOR THE EPICC DATA
+
+1. Converting only the CRIS genes to Ensemble ids first. 
+
+```{r}
+#instaling biomart 
+if (!requireNamespace("biomaRt", quietly = TRUE)) {
+  install.packages("biomaRt")
+}
+library(biomaRt)
+
+#Ensembl BioMart dataset for human genes
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+# List of CRIS gene symbols provided by you
+cris_genes <- c("ACSM3", "AGR3", "AGT", "AHNAK2", "AKR1C3", "ALDH4A1", "AMT", "ARHGAP23", "ASCL2", "ATOH1", 
+                "BCAS1", "CAB39L", "CALB2", "CDHR1", "CDR2L", "CEACAM7", "CES1", "CKMT2", "CLIC3", "COL17A1", 
+                "CRYL1", "CTSA", "CYP4X1", "DPEP1", "ERP27", "FAM69B", "FCGBP", "FGGY", "FYN", "GCNT3", "GGT6", 
+                "GUCY2C", "HEPACAM2", "IFIT3", "IL1R2", "IRF9", "KLK1", "KLK10", "KLK6", "KRT23", "LAMA5", 
+                "LARP6", "MALL", "MAP7D2", "MLPH", "MRAP2", "MUC12", "MUC2", "MUC4", "MX2", "NES", "NKD1", 
+                "NMNAT3", "NOTUM", "PDZK1IP1", "PLTP", "PPP2R2C", "PRSS23", "PTK7", "PTRF", "RAB27B", "REG4", 
+                "S100A4", "SERPINB5", "SLC26A3", "SLC3A1", "SLC46A3", "SLC5A1", "SPINK4", "ST6GAL1", "TCN1", 
+                "TESC", "TMEM176A", "TMPRSS3", "TNNC2", "TRIM7", "TRNP1", "TSPAN33", "UCA1", "VANGL2")
+
+# Query Ensembl to map the CRIS gene symbols to their corresponding Ensembl IDs
+gene_mapping <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id"), 
+                      filters = "hgnc_symbol", 
+                      values = cris_genes, 
+                      mart = ensembl)
+
+# Print the mapping of CRIS gene symbols to Ensembl IDs
+print(gene_mapping)
+
+
+
+```
+2. Now getting the expression data for these genes and saving it in a new dataframe. 
+
+```{r}
+
+#EPICC dataset
+epicc_data <- read_excel("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/EPICC_dataset.xlsx")
+
+#filtering the EPICC dataset to retain only rows that match the Ensembl IDs of the CRIS genes
+filtered_data <- epicc_data[epicc_data$GeneID %in% gene_mapping$ensembl_gene_id, ]
+
+filtered_data$GeneID <- gene_mapping$hgnc_symbol[match(filtered_data$GeneID, gene_mapping$ensembl_gene_id)]
+
+#renaming the gene symbol column 
+colnames(filtered_data)[1] <- "GENE_SYMBOL"
+
+```
+
+3. Only performing the CRIS classification on the cris data. 
+
+
+```{r}
+#loading the classifier 
+library(CRISclassifier)
+
+#converting the filtered_data to a data.frame
+filtered_data_2 <- as.data.frame(filtered_data)
+
+#setting the Gene Symbol as rownames and removing the first column whihc is the gene symbol column 
+rownames(filtered_data_2) <- filtered_data_2$`GENE_SYMBOL`
+filtered_data_2 <- filtered_data_2[, -1]  
+
+#converting the filtered data into a matrix for CRIS classification
+gene_expression_matrix <- as.matrix(filtered_data_2)
+
+print(dim(gene_expression_matrix))
+print(head(rownames(gene_expression_matrix))) 
+
+#performing the CRIS classification
+cris_classification <- predictCRISclassKTSP(gene_expression_matrix)
+
+print(cris_classification)
+
+```
+
+4. Plotting them in a bar plolt - only cris genes 
+
+```{r}
+#convert the CRIS classification results into a dataframe
+cris_classification_df <- data.frame(
+  Sample = sub("_.*", "", names(cris_classification$tspSetClassPredsFinal)),  # Extract patient names (before the '_')
+  CRIS = as.character(cris_classification$tspSetClassPredsFinal)  # Convert CRIS classifications to characters
+)
+
+#group by Sample and CRIS type, and count the occurrences
+cris_summary <- cris_classification_df %>%
+  group_by(Sample, CRIS) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  tidyr::spread(CRIS, Count, fill = 0)
+
+#ensure all CRIS categories are included
+expected_cris <- c("CRISA", "CRISB", "CRISC", "CRISD", "CRISE")
+for (cris in expected_cris) {
+  if (!cris %in% colnames(cris_summary)) {
+    cris_summary[[cris]] <- 0  # Fill missing CRIS categories with zero counts
+  }
+}
+
+#reordering the columns to display Sample first, followed by CRISA to CRISE
+cris_summary <- cris_summary %>%
+  dplyr::select(Sample, all_of(expected_cris))
+
+print(cris_summary)
+
+```
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Reshaping the data: Convert from wide to long format
+cris_long <- cris_summary %>%
+  pivot_longer(cols = -Sample, names_to = "CRIS_Type", values_to = "Count")
+
+# Creating the bar plot
+ggplot(cris_long, aes(x = Sample, y = Count, fill = CRIS_Type)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "CRIS classification plot for EPICC data", 
+       x = "Sample", 
+       y = "Count", 
+       fill = "CRIS Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("CRISA" = "blue", "CRISB" = "green", "CRISC" = "red", "CRISD" = "yellow", "CRISE" = "purple"))
+
+```
+
+5. Performing the cris classification on the entire dataset 
+
+
+```{r}
+library(biomaRt)
+library(dplyr)
+library(readxl)
+library(writexl)
+
+# 1. Load the EPICC dataset from the specified file path
+file <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/EPICC_dataset.xlsx"
+data <- read_xlsx(file)
+
+# 2.defining the  Ensembl IDs to remove from the dataset
+remove_ids <- c("ENSG00000005187", "ENSG00000173467", "ENSG00000135744", "ENSG00000185567", 
+                "ENSG00000196139", "ENSG00000159423", "ENSG00000145020", "ENSG00000273780", 
+                "ENSG00000275832", "ENSG00000183734", "ENSG00000172238", "ENSG00000064787", 
+                "ENSG00000102547", "ENSG00000282830", "ENSG00000172137", "ENSG00000148600",
+                "ENSG00000109089", "ENSG00000280501", "ENSG00000007306", "ENSG00000262243",
+                "ENSG00000198848", "ENSG00000131730", "ENSG00000169583", "ENSG00000065618",
+                "ENSG00000165475", "ENSG00000064601", "ENSG00000186377", "ENSG00000015413",
+                "ENSG00000139055", "ENSG00000281123", "ENSG00000275395", "ENSG00000172456",
+                "ENSG00000010810", "ENSG00000140297", "ENSG00000167741", "ENSG00000070019", 
+                "ENSG00000188175", "ENSG00000119917", "ENSG00000115590", "ENSG00000285048",
+                "ENSG00000213928", "ENSG00000167748", "ENSG00000129451", "ENSG00000167755",
+                "ENSG00000263309", "ENSG00000108244", "ENSG00000130702", "ENSG00000166173",
+                "ENSG00000144063", "ENSG00000184368", "ENSG00000115648", "ENSG00000135324", 
+                "ENSG00000205277", "ENSG00000278466", "ENSG00000198788", "ENSG00000293532",
+                "ENSG00000277585", "ENSG00000273822", "ENSG00000278303", "ENSG00000278468",
+                "ENSG00000273984", "ENSG00000276613", "ENSG00000275164", "ENSG00000145113",
+                "ENSG00000183486", "ENSG00000132688", "ENSG00000140807", "ENSG00000163864",
+                "ENSG00000185269", "ENSG00000162366", "ENSG00000100979", "ENSG00000074211",
+                "ENSG00000150687", "ENSG00000112655", "ENSG00000041353", "ENSG00000134193",
+                "ENSG00000196154", "ENSG00000206075", "ENSG00000091138", "ENSG00000138079",
+                "ENSG00000139508", "ENSG00000100170", "ENSG00000122711", "ENSG00000073849",
+                "ENSG00000134827", "ENSG00000088992", "ENSG00000002933", "ENSG00000160183",
+                "ENSG00000101470", "ENSG00000146054", "ENSG00000253368", "ENSG00000158457",
+                "ENSG00000214049", "ENSG00000162738")
+
+#filter out the Ensembl IDs to be removed
+data_filtered <- data %>%
+  filter(!GeneID %in% remove_ids)
+
+#connect to Ensembl via biomaRt to get gene symbols for the remaining Ensembl IDs
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+#extract the unique Ensembl IDs from the remaining dataset
+ensembl_ids <- unique(data_filtered$GeneID)
+
+#split the Ensembl IDs into batches to avoid server timeouts
+batch_size <- 500
+ensembl_id_batches <- split(ensembl_ids, ceiling(seq_along(ensembl_ids) / batch_size))
+
+#initialize an empty dataframe to store the mapping results
+mapped_ids <- data.frame()
+
+#loop through each batch and query Ensembl for gene symbols
+for (batch in ensembl_id_batches) {
+  tryCatch({
+    batch_result <- getBM(
+      attributes = c('ensembl_gene_id', 'hgnc_symbol'),
+      filters = 'ensembl_gene_id',
+      values = batch,
+      mart = ensembl
+    )
+    
+    #append the results to the mapped_ids dataframe
+    mapped_ids <- bind_rows(mapped_ids, batch_result)
+  
+    Sys.sleep(1)
+    
+  }, error = function(e) {
+    message("Error: ", e)
+  })
+}
+
+#renaming the columns 
+colnames(mapped_ids) <- c('GeneID', 'GENE_SYMBOL')
+
+#removing the duplicates and ensure that gene symbols are unique
+mapped_ids_unique <- mapped_ids %>%
+  group_by(GeneID) %>%
+  summarise(GENE_SYMBOL = dplyr::first(GENE_SYMBOL)) %>%
+  ungroup()
+
+#removing the rows with NA Gene Symbols
+mapped_ids_clean <- mapped_ids_unique %>%
+  filter(!is.na(GENE_SYMBOL))
+
+#merging the mapped gene symbols back with the filtered data
+merged_data <- left_join(data_filtered, mapped_ids_clean, by = "GeneID")
+
+#defining the expression columns (excluding the first column which is GeneID)
+expression_cols <- names(data)[2:ncol(data)]
+
+#averaging the expression values where multiple Ensembl IDs map to the same gene symbol
+final_data <- merged_data %>%
+  group_by(GENE_SYMBOL) %>%
+  summarise(across(all_of(expression_cols), mean, na.rm = TRUE)) %>%
+  ungroup()
+
+
+
+```
+
+
+6. MERGING THE TWO DATASETS - ONE WITH CRIS GENES expression data and the other without those genes but the rest of the data because we already did the mapping for cris genes seperately.
+
+```{r}
+
+# Combine final_data and filtered_data based on GENE_SYMBOL
+combined_data <- bind_rows(final_data, filtered_data)
+
+str(combined_data)
+print(head(combined_data))
+
+output = "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/EPICC_dataset_genesymbols_combined.xlsx"
+write.xlsx(combined_data, output)
+
+
+```
+7. Performing cris classification now for this dataset. 
+
+```{r}
+#checking if there are any missing values in the 'GENE_SYMBOL' column
+sum(is.na(combined_data$GENE_SYMBOL))
+
+#if there are any missing values removing them before setting the genes as row names 
+combined_data <- combined_data %>% filter(!is.na(GENE_SYMBOL))
+rownames(combined_data) <- combined_data$GENE_SYMBOL
+
+#cris classification
+gene_expression_matrix <- as.matrix(combined_data)
+
+# Perform CRIS classification
+cris_classification_epicc <- predictCRISclassKTSP(gene_expression_matrix)
+
+# Print the classification results
+print(cris_classification_epicc)
+
+
+```
+
+8. PLOTTING THE GRAPH FOR THE CRISS CLASSIFICATION. 
+
+```{r}
+
+#convert the CRIS classification results into a dataframe
+cris_classification_epic<- data.frame(
+  Sample = sub("_.*", "", names(cris_classification_epicc$tspSetClassPredsFinal)),  # Extract patient names (before the '_')
+  CRIS = as.character(cris_classification_epicc$tspSetClassPredsFinal)  # Convert CRIS classifications to characters
+)
+
+#group by Sample and CRIS type, and count the occurrences
+cris_summary_epic <- cris_classification_epic %>%
+  group_by(Sample, CRIS) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  tidyr::spread(CRIS, Count, fill = 0)
+
+#ensure all CRIS categories (A-E) are included
+expected_cris_epic <- c("CRISA", "CRISB", "CRISC", "CRISD", "CRISE")
+for (cris in expected_cris_epic) {
+  if (!cris %in% colnames(cris_summary_epic)) {
+    cris_summary_epic[[cris]] <- 0  # Fill missing CRIS categories with zero counts
+  }
+}
+
+#reordering the columns to display Sample first, followed by CRISA to CRISE
+cris_summary_epic <- cris_summary_epic %>%
+  dplyr::select(Sample, all_of(expected_cris_epic))
+
+
+#removing the row where Sample is "GENE"
+cris_summary_epic <- cris_summary_epic %>% 
+  filter(Sample != "GENE")
+print(cris_summary_epic)
+
+```
+
+
+```{r}
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+#reshaping the data 
+#Converting from wide to long format
+cris_long <- cris_summary_epic %>%
+  pivot_longer(cols = -Sample, names_to = "CRIS_Type", values_to = "Count")
+
+#creating the bar plot
+ggplot(cris_long, aes(x = Sample, y = Count, fill = CRIS_Type)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "CRIS classification plot for entire EPICC data ", 
+       x = "Sample", 
+       y = "Count", 
+       fill = "CRIS Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("CRISA" = "blue", "CRISB" = "green", "CRISC" = "red", "CRISD" = "yellow", "CRISE" = "purple"))
+```
+
