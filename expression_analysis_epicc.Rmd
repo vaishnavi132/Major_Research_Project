@@ -1,0 +1,349 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+MEAN EXPRESSION ANALYSIS ON EPICC DATA.
+
+
+-  First I have pre processed the data to only include the highly expressed genes. The filtering criteria is different for this dataset as the dataset is large and it contains a lot of lowely expressed genes. 
+-  Then I have calculated the Coefficient of Variation ( CV ) for each patient using for loop by using the formula CV = Variance / Mean. 
+-  Lastly, plotting the average CV across all patients using ggplot. 
+
+Note :  Patient C555 and C562 have  only one sample i.e.C555_C1_G2. The Coefficient of Variation (CV) requires at least two values (samples) to calculate variance. When you have only one value, the variance is undefined, and this leads to NA values for the variance and thus the CV is 0. 
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(readxl)
+library(viridis)
+
+#calculating the Coefficient of Variation for each patient group. 
+calculate_cv_for_patient <- function(patient_data) {
+  #cv = variance / mean 
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(Mean = mean(c_across(-GeneID), na.rm = TRUE),
+           Variance = var(c_across(-GeneID), na.rm = TRUE),
+           CV = sqrt(Variance) / Mean) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+#loading the EPICC dataset
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/EPICC_dataset.xlsx"
+all_data <- read_xlsx(file_path)
+
+#filtering the dataset using these criterias to only keep the highly expressed genes. 
+filtered_data <- all_data %>%
+  rowwise() %>%
+  filter(sum(c_across(starts_with("C"))) > 0) %>%
+  filter(sum(c_across(starts_with("C"))) >= 30) %>%
+  filter(mean(c_across(starts_with("C")) > 50) >= 0.5)
+
+
+col_names <- colnames(filtered_data)
+
+#extracting the patient identifier names
+#by taking the first part of each column ( C516 from C516_B1_G7)
+patient_ids <- unique(sub("_.*", "", col_names[-1]))
+
+#creating empty lists to store the avg CV and mean for each of the patients. 
+average_cv_list <- list()
+average_mean_list <- list()
+
+#looping through each unique patient identifier
+for (pat in patient_ids) {
+  #selecting all columns related to the patient. 
+  pat_cols <- grep(paste0("^", pat, "_"), colnames(filtered_data), value = TRUE)
+  
+  #checking if the patient column exists  
+  if (length(pat_cols) > 0) {
+    #creating a subset for that specific patient 
+    pat_data <- filtered_data %>%
+      dplyr::select(GeneID, all_of(pat_cols))  
+    
+    #calculating the stats for that patient 
+    pat_stats <- calculate_cv_for_patient(pat_data)
+    
+    #calculating the average CV and mean for this patient and storing it
+    average_cv <- mean(pat_stats$CV, na.rm = TRUE)
+    average_mean <- mean(pat_stats$Mean, na.rm = TRUE)
+    
+    average_cv_list[[pat]] <- average_cv
+    average_mean_list[[pat]] <- average_mean
+  }
+}
+
+#converting the list to a dataframe for plotting
+average_cv_df <- data.frame(
+  Patient = names(average_cv_list),
+  Average_CV = unlist(average_cv_list),
+  Average_Mean = unlist(average_mean_list)
+)
+
+#check if any patients are missing : debugging here 
+missing_patients <- setdiff(patient_ids, names(average_cv_list))
+if (length(missing_patients) > 0) {
+  print(paste("Missing patients:", paste(missing_patients, collapse = ", ")))
+}
+
+#plotting average CV for all patients 
+p1 <- ggplot(average_cv_df, aes(x = Patient, y = Average_CV, fill = Patient)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Average Coefficient of Variation (CV) for Each Patient Group",
+       x = "Patient Group",
+       y = "Average CV") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_viridis_d()
+
+print(p1)
+
+
+```
+
+2. Plotting the scatter plot for each patient group with log scales. Mean Expression vs CV. 
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(readxl)
+library(viridis)
+
+#calculating the coefficient of variation (CV) for each patient group
+calculate_cv_for_patient <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(Mean = mean(c_across(-GeneID), na.rm = TRUE),
+           Variance = var(c_across(-GeneID), na.rm = TRUE),
+           CV = sqrt(Variance) / Mean) %>%
+    ungroup()
+  return(pat_stats)
+}
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/EPICC_dataset.xlsx"  # Adjusted for the uploaded file
+all_data <- read_xlsx(file_path)
+
+# Filter the dataset using the specified criteria to only keep the highly expressed genes
+filtered_data <- all_data %>%
+  rowwise() %>%
+  filter(sum(c_across(starts_with("C"))) > 0) %>%
+  filter(sum(c_across(starts_with("C"))) >= 30) %>%
+  filter(mean(c_across(starts_with("C")) > 50) >= 0.5)
+
+col_names <- colnames(filtered_data)
+
+#extracting patient identifier names by taking the first part of each column name (e.g., C516 from C516_B1_G7)
+patient_ids <- unique(sub("_.*", "", col_names[-1]))
+
+#creating empty lists to store the avg CV and mean for each of the patients
+average_cv_list <- list()
+average_mean_list <- list()
+
+#defining the color pallete 
+color_palette <- viridis::viridis(length(patient_ids))
+
+#looping through each unique patient identifier
+for (i in seq_along(patient_ids)) {
+  pat <- patient_ids[i]
+  
+  pat_cols <- grep(paste0("^", pat, "_"), colnames(filtered_data), value = TRUE)
+  
+  #checking if the patient column exists
+  if (length(pat_cols) > 0) {
+    #creating a subset for that specific patient
+    pat_data <- filtered_data %>%
+      dplyr::select(GeneID, all_of(pat_cols))
+    
+    #calculating the stats for that patient
+    pat_stats <- calculate_cv_for_patient(pat_data)
+    
+    #filtering out rows with Mean or CV values near zero to avoid log issues
+    pat_stats <- pat_stats %>%
+      filter(Mean > 500 , CV > 0.2 )  
+
+    #plotting the scatter plot for this patient with a unique color
+    p <- ggplot(pat_stats, aes(x = log(Mean), y = log(CV))) +
+      geom_point(alpha = 0.5, color = color_palette[i]) +  # Assign a unique color
+      theme_minimal() +
+      labs(title = paste("Log-Scale Scatter Plot of Mean Expression vs. CV for", pat),
+           x = "Mean Expression (log scale)",
+           y = "Coefficient of Variation (CV, log scale)") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    
+    print(p)
+  }
+}
+
+
+```
+```{r}
+
+library(dplyr)
+
+#calculating mean, variance, and CV for each patient group
+calculate_cv_for_patient <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(Mean = mean(c_across(-GeneID), na.rm = TRUE),
+           Variance = var(c_across(-GeneID), na.rm = TRUE),
+           CV = sqrt(Variance) / Mean) %>%
+    ungroup()
+  return(pat_stats)
+}
+
+#looping through each unique patient identifier and print the dataframe
+for (pat in patient_ids) {
+  
+  #selecting all columns related to the patient
+  pat_cols <- grep(paste0("^", pat, "_"), colnames(filtered_data), value = TRUE)
+  
+  #checking if the patient column exists
+  if (length(pat_cols) > 0) {
+    pat_data <- filtered_data %>%
+      dplyr::select(GeneID, all_of(pat_cols))
+    pat_stats <- calculate_cv_for_patient(pat_data)
+    cat("\nData for patient:", pat, "\n")
+    print(pat_stats)
+  }
+}
+
+```
+
+
+
+3. PERFORMING LOOCV FOR PATIENT 1 - 10 
+
+
+```{r}
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(viridis)
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/EPICC_dataset.xlsx"
+all_data <- read_xlsx(file_path)
+
+#filtering the dataset to keep only the highly expressed genes
+filtered_data <- all_data %>%
+  rowwise() %>%
+  filter(sum(c_across(starts_with("C"))) > 0) %>%
+  filter(sum(c_across(starts_with("C"))) >= 30) %>%
+  filter(mean(c_across(starts_with("C")) > 50) >= 0.5)
+
+#extracting unique patient identifiers by taking the first part of the column names
+patient_groups <- unique(gsub("_.*", "", colnames(filtered_data)[-1]))
+
+#limiting the analysis first to the first 10 patient IDs
+patient_groups <- patient_groups[1:10]
+
+#initializing a list to store the LOOCV data frames
+loocv_dfs <- list()
+average_cv_dfs <- data.frame()
+
+# Function to calculate the mean, variance, and CV for a given patient's data
+calculate_stats <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(
+      Mean = mean(c_across(where(is.numeric)), na.rm = TRUE),
+      Variance = var(c_across(where(is.numeric)), na.rm = TRUE),
+      CV = ifelse(Mean == 0, NA, sqrt(Variance) / Mean)  # Avoid division by zero
+    ) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+# Loop through the first 10 patient groups to perform LOOCV
+for (pat in patient_groups) {
+  # Match the samples for each patient
+  pat_data_filtered <- filtered_data %>%
+    dplyr::select(GeneID, matches(paste0("^", pat, "_")))
+
+  # Get the column names corresponding to the patient samples
+  pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_"), colnames(pat_data_filtered))]
+  
+  # Calculating the row-wise means (mean expression) across patient columns
+  row_means <- rowMeans(pat_data_filtered[, -1], na.rm = TRUE)
+  
+  # Calculating the median of the row-wise means
+  median_threshold <- median(row_means, na.rm = TRUE)
+  
+  # Initializing a list to store CV values for each LOOCV iteration
+  cv_values <- list()
+  
+  # Perform LOOCV for each sample in the patient group
+  for (i in seq_along(pat_columns)) {
+    # Exclude one sample at a time and calculate stats for the remaining samples
+    loocv_data <- pat_data_filtered %>% dplyr::select(-all_of(pat_columns[i]))
+    
+    #calculate Mean, Variance, and CV for the remaining samples
+    stats <- calculate_stats(loocv_data)
+    
+    # Filter out genes with mean expression less than the median threshold
+    stats_filtered <- stats %>%
+      filter(Mean >= median_threshold)
+    
+    #only the top 500 genes with the highest CV
+    top_stats <- stats_filtered %>%
+      arrange(desc(CV)) %>%
+      slice_head(n = 500)
+    if (nrow(top_stats) > 0) {  
+      cv_column_name <- paste(pat_columns[i], "CV", sep = "_")
+      loocv_dfs[[cv_column_name]] <- top_stats$CV
+      cv_values[[cv_column_name]] <- top_stats$CV
+    }
+  }
+  
+  #combine the CV values into a data frame if there are CV values
+  if (length(cv_values) > 0) {
+    cv_df <- as.data.frame(cv_values)
+    
+    # Calculate the average CV for each LOOCV iteration
+    avg_cv <- colMeans(cv_df, na.rm = TRUE)
+    
+    # Ensure avg_cv is not empty before proceeding
+    if (length(avg_cv) > 0) {
+      # Combine the average CV into the result data frame
+      avg_cv_df <- data.frame(Patient = pat, Sample = names(avg_cv), Avg_CV = avg_cv)
+      
+      # Append the results to the main average CV dataframe
+      average_cv_dfs <- rbind(average_cv_dfs, avg_cv_df)
+    }
+  }
+  
+  #print the resulting data frames for each patient
+  print(paste("Data frame for patient:", pat))
+  print(cv_df)
+}
+
+library(ggplot2)
+
+#creating a dynamic color scale based on the number of unique samples
+unique_samples <- unique(average_cv_dfs$Sample)
+color_count <- length(unique_samples)
+color_palette <- scales::hue_pal()(color_count)
+
+ggplot(average_cv_dfs, aes(x = Patient, y = Avg_CV, color = Sample)) +
+  geom_point(size = 3, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Average CV per Patient",
+       x = "Patient Group",
+       y = "Average CV") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_manual(values = color_palette)  # Apply dynamic colors
+
+#saving the plot
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/Average_CV_per_Patient_1st_batch.png", width = 15, height = 8, units = "in", dpi = 300, bg= "white")
+
+
+
+```
