@@ -178,12 +178,10 @@ cms_summary <- cms_summary %>%
 
 print(cms_summary)
 
-
-
-
 ```
 
 
+6. PLOTTING THE CMS PLOT FOR THE EPICC DATASET 
 
 ```{r}
 library(ggplot2)
