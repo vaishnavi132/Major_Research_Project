@@ -1,0 +1,104 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Title : iCMS classification for the EPICC dataset - iCMS2 and iCMS3. 
+
+1. PERFORMING THE iCMS CLASSIFICATION USING THE iCMS.KNN function. 
+
+```{r}
+#downloading the package for ICMS classification
+if(!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+}
+library(devtools)
+
+#installing the package from github 
+devtools::install_github('CRCrepository/iCMS.SSC', force = TRUE)
+
+```
+```{r}
+#loading the libraries
+if (!requireNamespace("writexl", quietly = TRUE)) install.packages("writexl")
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+
+library(readxl)
+library(writexl)
+library(dplyr)
+library(iCMS.SSC)
+
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/EPICC_dataset_genesymbols_combined.xlsx"
+final_data <- read_excel(file_path)
+
+final_data <- final_data[-1, ]
+
+#checking for missing values 
+sum(is.na(final_data$GENE_SYMBOL))
+
+#removing rows with NA values'
+final_data <- final_data %>% filter(!is.na(GENE_SYMBOL))
+
+#converting the final_data to dataframe 
+final_data_1 <- as.data.frame(final_data)
+
+#setting the row names to GENE_SYMBOLS 
+rownames(final_data_1) <- final_data$GENE_SYMBOL
+final_data_1 <- final_data_1 %>% dplyr::select(-GENE_SYMBOL)
+
+#conversion for gene expression matrix
+expression_matrix <- as.matrix(final_data_1)
+
+#perform iCMS classification on the entire matrix
+#setting the jobs to 1 to avoid parallel processing on Windows
+icms_results <- iCMS.KNN(expression_matrix, jobs = 1)
+
+print(icms_results)
+
+```
+
+2. PLOTTING THE GRAPH FOR ALL PATIENTS WITH THE SAMPLE COUNTS CLASSIFIED AS iCMS2 or iCMS3. 
+
+```{r}
+#first extracting the patient IDs from sample names (assuming the format is like "C516_B1_G7")
+icms_results$patient <- sub("_.*", "", rownames(icms_results))  # Extract patient ID
+
+# Create a table with counts for iCMS2, iCMS3, and NA for each patient
+icms_summary <- icms_results %>%
+  group_by(patient) %>%
+  summarise(
+    iCMS2 = sum(confident.icms == "i2", na.rm = TRUE),
+    iCMS3 = sum(confident.icms == "i3", na.rm = TRUE),
+    NA_count = sum(is.na(confident.icms))
+  )
+
+#print the patient-wise summary table
+print(icms_summary)
+
+```
+
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+#reshaping the graph 
+icms_long <- icms_summary %>%
+  pivot_longer(cols = -patient, names_to = "iCMS_Type", values_to = "Count")
+
+#plotting the icms counts for the two types for each patient
+ggplot(icms_long, aes(x = patient, y = Count, fill = iCMS_Type)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "iCMS classification plot for EPICC data", 
+       x = "Patient", 
+       y = "Count", 
+       fill = "iCMS Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("iCMS2" = "violet", "iCMS3" = "lightblue", "NA_count" = "grey"))
+
+```
+
