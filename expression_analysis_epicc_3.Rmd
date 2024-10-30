@@ -1,0 +1,106 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+LOOCV Analysis from Patient 20 to Patient 27 ( This is just the number of patients not the patient names. I have made it easy for the title. )
+
+```{r}
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(viridis)
+
+file_path <- "C:/Users/Vaishnavi Raikar/OneDrive/Desktop/MAJOR THESIS - VAISHNAVI/EPICC_dataset.xlsx"
+all_data <- read_xlsx(file_path)
+
+filtered_data <- all_data %>%
+  rowwise() %>%
+  filter(sum(c_across(starts_with("C"))) > 0) %>%
+  filter(sum(c_across(starts_with("C"))) >= 30) %>%
+  filter(mean(c_across(starts_with("C")) > 50) >= 0.5)
+
+patient_groups <- unique(gsub("_.*", "", colnames(filtered_data)[-1]))
+#for the last 7 patients
+patient_groups <- patient_groups[20:27]
+
+loocv_dfs <- list()
+average_cv_dfs <- data.frame()
+
+calculate_stats <- function(patient_data) {
+  pat_stats <- patient_data %>%
+    rowwise() %>%
+    mutate(
+      Mean = mean(c_across(where(is.numeric)), na.rm = TRUE),
+      Variance = var(c_across(where(is.numeric)), na.rm = TRUE),
+      CV = ifelse(Mean == 0 | Mean < 1e-6, NA, sqrt(Variance) / Mean)
+    ) %>%
+    ungroup()
+  
+  return(pat_stats)
+}
+
+for (pat in patient_groups) {
+  pat_data_filtered <- filtered_data %>%
+    dplyr::select(GeneID, matches(paste0("^", pat, "_")))
+
+  pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_"), colnames(pat_data_filtered))]
+  
+  row_means <- rowMeans(pat_data_filtered[, -1], na.rm = TRUE)
+  
+  median_threshold <- median(row_means, na.rm = TRUE)
+  
+  cv_values <- list()
+  
+  for (i in seq_along(pat_columns)) {
+    loocv_data <- pat_data_filtered %>% dplyr::select(-all_of(pat_columns[i]))
+    
+    if (ncol(loocv_data) <= 2) {
+      message(paste("Skipping patient", pat, "due to insufficient samples for LOOCV."))
+      next
+    }
+    
+    stats <- calculate_stats(loocv_data)
+    
+    stats_filtered <- stats %>%
+      filter(Mean >= median_threshold)
+    
+    top_stats <- stats_filtered %>%
+      arrange(desc(CV)) %>%
+      slice_head(n = 500)
+    
+    if (nrow(top_stats) > 0) {
+      cv_column_name <- paste(pat_columns[i], "CV", sep = "_")
+      loocv_dfs[[cv_column_name]] <- top_stats$CV
+      cv_values[[cv_column_name]] <- top_stats$CV
+    }
+  }
+  
+  if (length(cv_values) > 0) {
+    cv_df <- as.data.frame(cv_values)
+    
+    avg_cv <- colMeans(cv_df, na.rm = TRUE)
+    
+    if (length(avg_cv) > 0) {
+      avg_cv_df <- data.frame(Patient = pat, Sample = names(avg_cv), Avg_CV = avg_cv)
+      
+      average_cv_dfs <- rbind(average_cv_dfs, avg_cv_df)
+    }
+  }
+  
+  print(paste("Data frame for patient:", pat))
+  print(cv_df)
+}
+
+ggplot(average_cv_dfs, aes(x = Patient, y = Avg_CV, color = Sample)) +
+  geom_point(size = 3, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Average CV per Patient",
+       x = "Patient Group",
+       y = "Average CV") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_hue()
+
+ggsave("C:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishnavi/Average_CV_per_Patient_3rd_batch.png", width = 15, height = 8, units = "in", dpi = 300, bg= "white")
+
+```
