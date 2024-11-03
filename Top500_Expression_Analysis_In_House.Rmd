@@ -159,7 +159,7 @@ input_file <- "c:/Users/Vaishnavi Raikar/OneDrive/Desktop/Major Thesis - Vaishna
 input_data <- read_xlsx(input_file)
 
 numeric_columns <- input_data %>%
-  select(where(is.numeric))  
+  dplyr::select(where(is.numeric))  
 
 #rowSums to only numeric columns
 filtered_data <- input_data %>%
@@ -263,42 +263,19 @@ for (sample in selected_samples) {
 
 
 ```{r}
-# 1.combining the gene lists from selected samples into a single data frame
-all_genes <- bind_rows(lapply(selected_samples, function(sample) {
-  data.frame(Gene = loocv_dfs[[sample]]$Gene, Patient = sample)
-}))
-
-# 2.identifying the common genes that appear in at least 3 different patient samples
-common_genes <- all_genes %>%
+# 2. Identifying the common genes that appear in more than 3 different patient samples
+common_genes_more_than_3 <- all_genes %>%
   group_by(Gene) %>%
   summarize(Count = n_distinct(Patient)) %>%
-  filter(Count >= 3) %>%
+  filter(Count >= 3) %>%  # Adjusted to filter for genes occurring in more than 3 patients
   arrange(desc(Count))
 
-# 3.storing the common genes by initialising a new dataframe 
-common_genes_cvs <- data.frame(Gene = common_genes$Gene)
+# Print the genes that occur in more than 3 patients
+print(common_genes_more_than_3$Gene)
 
-# 4.looping through selected_samples and add the CV values for each common gene
-for (sample in selected_samples) {
-  # Extract the Gene and CV columns for the current sample
-  sample_df <- loocv_dfs[[sample]][, c("Gene", "CV")]
-  
-  #merging current sample's CV values into the common_genes_cvs dataframe
-  common_genes_cvs <- merge(common_genes_cvs, sample_df, by = "Gene", all.x = TRUE)
-  
-  #rennaming the CV column to correspond to the sample name
-  colnames(common_genes_cvs)[ncol(common_genes_cvs)] <- sample
-}
 
-# 5.replacing the NA values with 0 
-common_genes_cvs[is.na(common_genes_cvs)] <- 0
-print(common_genes_cvs)
-
-# Assuming final_data is your DataFrame
-write.csv(final_data, "C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.csv", row.names = FALSE)
-
-# Load necessary libraries
-library(ggplot2)
+# Save the result to an Excel file
+write_xlsx(common_genes_more_than_3, "C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.xlsx")
 
 ```
 
@@ -316,7 +293,7 @@ input_data <- read_xlsx(input_file)
 
 #filtering data to remove genes with 0 counts across all samples
 filtered_data <- input_data %>%
-  filter(rowSums(select(., where(is.numeric))) > 0)
+  filter(rowSums(dplyr::select(., where(is.numeric))) > 0)
 
 #filtering out genes with counts less than 20 in any patient sample
 filtered_data <- filtered_data %>%
@@ -331,7 +308,7 @@ loocv_dfs <- list()
 calculate_stats <- function(patient_data) {
   #select only numeric columns for the calculations
   numeric_patient_data <- patient_data %>% 
-    select(where(is.numeric))
+    dplyr::select(where(is.numeric))
   
   #calculate Mean, Variance, and CV
   pat_stats <- patient_data %>%
@@ -353,13 +330,13 @@ calculate_stats <- function(patient_data) {
 #loop through each patient group
 for (pat in patient_groups) {
   pat_data_filtered <- filtered_data %>%
-    select(Gene, matches(paste0("^", pat, "_Sam")))
+    dplyr::select(Gene, matches(paste0("^", pat, "_Sam")))
   
   if (pat %in% c("Pat1", "Pat3")) {
     pat_columns <- colnames(pat_data_filtered)[grep(paste0("^", pat, "_Sam"), colnames(pat_data_filtered))]
     
     for (i in seq_along(pat_columns)) {
-      loocv_data <- pat_data_filtered %>% select(-all_of(pat_columns[i]))
+      loocv_data <- pat_data_filtered %>% dplyr::select(-all_of(pat_columns[i]))
       stats <- calculate_stats(loocv_data)
       stats_filtered <- stats %>% filter(Mean >= 100)
       top_stats <- stats_filtered %>% arrange(desc(CV)) %>% slice_head(n = 500)
