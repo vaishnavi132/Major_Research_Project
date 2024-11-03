@@ -24,11 +24,12 @@ if (!requireNamespace("ggplot2", quietly = TRUE)) {
 library(enrichR)
 library(dplyr)
 library(ggplot2)
+library(openxlsx)
 
 #the common genes were stored 
 # Load the dataset
-input_file <- "C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.csv"
-gene_list <- read.csv(input_file)
+input_file <- "C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.xlsx"
+gene_list <- read.xlsx(input_file)
 
 #converting the gene symbols into a vector
 genes <- as.character(gene_list$Gene)
@@ -127,7 +128,7 @@ library(org.Hs.eg.db)
 library(pathview)
 
 #common genes excel file 
-gene_data <- read.csv("C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.csv")
+gene_data <- read.csv("C:/Users/Vaishnavi Raikar/Downloads/common_genes_crc.xlsx")
 
 gene_list <- as.character(gene_data$Gene)
 
